@@ -213,7 +213,7 @@ func runScenario(sc *Scenario, cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
-	defer c.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = c.Close(websocket.StatusNormalClosure, "") }()
 
 	exec := &exec{
 		c:            c,

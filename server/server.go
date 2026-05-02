@@ -266,7 +266,7 @@ func (s *Server) Run(ctx context.Context) error {
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	listener, err := net_Listen("tcp", s.cfg.ListenAddr)
+	listener, err := netListen("tcp", s.cfg.ListenAddr)
 	if err != nil {
 		return fmt.Errorf("server: listen: %w", err)
 	}

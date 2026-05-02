@@ -77,7 +77,7 @@ func pgxRunOnce(ctx context.Context, scene *server.Scene, cfg PgxListenConfig) e
 	if err != nil {
 		return fmt.Errorf("pgx connect: %w", err)
 	}
-	defer conn.Close(context.Background())
+	defer func() { _ = conn.Close(context.Background()) }()
 
 	for _, ch := range cfg.Channels {
 		if _, err := conn.Exec(ctx, "LISTEN "+pgxQuoteIdent(ch)); err != nil {
