@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "type": "error",
+  "seq": 7,
+  "code": "UNKNOWN_PATH",
+  "message": "input references undeclared path: __inputs.does_not_exist",
+  "recoverable": true
+}

@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "type": "input",
+  "patches": [
+    { "path": "__inputs.title", "value": "Live Now" },
+    { "path": "__inputs.color_theme", "value": "dark" },
+    { "path": "__inputs.show_visible", "value": true }
+  ]
+}

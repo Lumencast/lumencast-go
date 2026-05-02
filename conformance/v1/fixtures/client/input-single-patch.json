@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "type": "input",
+  "patches": [
+    { "path": "__inputs.title", "value": "Hello" }
+  ]
+}

@@ -1,0 +1,32 @@
+name: ping-pong-roundtrip
+description: Either side sends ping ; the other replies with pong within 5 seconds.
+tag: required
+target: any
+spec_refs:
+  - LSDP-1#12-heartbeat
+
+steps:
+  - kind: client-sends
+    frame:
+      v: 1
+      type: subscribe
+      token: $TOKEN_OPERATOR
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: snapshot
+      seq: 1
+      scene_id: $ANY
+      scene_version: $ANY_HASH
+      state: {}
+
+  - kind: client-sends
+    frame:
+      v: 1
+      type: ping
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: pong

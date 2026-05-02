@@ -1,0 +1,25 @@
+# Build artefacts
+/dist/
+/bin/
+*.exe
+*.test
+*.out
+coverage.*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Local env
+.env
+.env.local
+
+# Go
+go.work
+go.work.sum
+vendor/
+
+# Health (machine-rewritten)
+.health.local.json

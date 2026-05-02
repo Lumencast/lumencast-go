@@ -1,0 +1,43 @@
+name: operator-input-echoes-as-delta
+description: Operator sends a valid input ; server applies it and emits the change back as a delta visible to all subscribers (including the originator).
+tag: required
+target: server
+spec_refs:
+  - LSDP-1#4.2-input
+  - LSDP-1#9-roles--write-authority
+
+steps:
+  - kind: client-sends
+    frame:
+      v: 1
+      type: subscribe
+      token: $TOKEN_OPERATOR
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: snapshot
+      seq: 1
+      scene_id: $ANY
+      scene_version: $ANY_HASH
+      state:
+        "__inputs.title": ""
+
+  - kind: client-sends
+    frame:
+      v: 1
+      type: input
+      patches:
+        - { path: "__inputs.title", value: "Live Now" }
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: delta
+      seq: 2
+      patches:
+        - { path: "__inputs.title", value: "Live Now" }
+
+  - kind: expect-server-state
+    state:
+      "__inputs.title": Live Now

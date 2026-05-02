@@ -1,0 +1,44 @@
+name: delta-replay-tolerated
+description: Runtime tolerates a duplicate seq (replay) by silently dropping it. State stays consistent.
+tag: required
+target: runtime
+spec_refs:
+  - LSDP-1#5-sequencing
+
+steps:
+  - kind: client-sends
+    frame:
+      v: 1
+      type: subscribe
+      token: $TOKEN_OPERATOR
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: snapshot
+      seq: 1
+      scene_id: t
+      scene_version: $ANY_HASH
+      state:
+        x: 0
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: delta
+      seq: 2
+      patches:
+        - { path: x, value: 5 }
+
+  # Replay seq 2 — must be dropped silently.
+  - kind: server-sends
+    frame:
+      v: 1
+      type: delta
+      seq: 2
+      patches:
+        - { path: x, value: 999 }
+
+  - kind: expect-runtime-state
+    state:
+      x: 5

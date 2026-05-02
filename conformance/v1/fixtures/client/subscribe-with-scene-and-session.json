@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "type": "subscribe",
+  "token": "test-token",
+  "scene": "test-scene",
+  "session": "00000000-0000-0000-0000-000000000001"
+}

@@ -1,0 +1,20 @@
+# Default — every file routes through the maintainer until the
+# project grows enough to support a multi-team model. When teams
+# are formalized (per the protocol repo's GOVERNANCE.md § Phases),
+# update this file.
+
+*                              @ClodoCapeo
+
+# Wire format — needs cross-SDK review
+/protocol/                     @ClodoCapeo
+/conformance/                  @ClodoCapeo
+
+# Server kit
+/server/                       @ClodoCapeo
+
+# CLI
+/cmd/                          @ClodoCapeo
+
+# CI / release
+/.github/                      @ClodoCapeo
+/.goreleaser.yaml              @ClodoCapeo

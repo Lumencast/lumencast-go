@@ -1,0 +1,55 @@
+{
+  "lsml": "1.0",
+  "scene_id": "scoreboard",
+  "scene_version": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "layout": {
+    "kind": "stack",
+    "direction": "vertical",
+    "gap": 24,
+    "padding": [40, 40, 40, 40],
+    "children": [
+      { "kind": "text", "bind": { "value": "__inputs.title" }, "style": { "fontSize": 48, "fontWeight": 700 } },
+      {
+        "kind": "stack",
+        "direction": "horizontal",
+        "gap": 80,
+        "children": [
+          {
+            "kind": "stack",
+            "direction": "vertical",
+            "children": [
+              { "kind": "text", "bind": { "value": "players.0.name" }, "style": { "fontSize": 32 } },
+              { "kind": "text", "bind": { "value": "players.0.score" }, "style": { "fontSize": 96, "fontWeight": 800 } }
+            ]
+          },
+          {
+            "kind": "stack",
+            "direction": "vertical",
+            "children": [
+              { "kind": "text", "bind": { "value": "players.1.name" }, "style": { "fontSize": 32 } },
+              { "kind": "text", "bind": { "value": "players.1.score" }, "style": { "fontSize": 96, "fontWeight": 800 } }
+            ]
+          }
+        ]
+      },
+      { "kind": "text", "bind": { "value": "period" }, "style": { "fontSize": 18 } }
+    ]
+  },
+  "operator_inputs": [
+    {
+      "path": "__inputs.title",
+      "label": "Title",
+      "type": "string",
+      "constraints": { "maxLength": 80 },
+      "writable_by": ["operator"]
+    }
+  ],
+  "defaults": {
+    "__inputs.title": "Match — Alice vs Bob",
+    "players.0.name": "Alice",
+    "players.0.score": 0,
+    "players.1.name": "Bob",
+    "players.1.score": 0,
+    "period": 1
+  }
+}

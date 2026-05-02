@@ -1,0 +1,62 @@
+name: invalid-value-rejected
+description: Input value violating declared type/constraints is rejected with INVALID_VALUE. The whole input frame is rejected atomically.
+tag: required
+target: server
+spec_refs:
+  - LSDP-1#4.2-input
+  - ERROR-CODES#invalid_value
+
+bundles:
+  - id: title-bundle
+    inline:
+      lsml: "1.0"
+      scene_id: t
+      scene_version: sha256:c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1
+      layout:
+        kind: text
+        bind: { value: "__inputs.title" }
+      operator_inputs:
+        - path: "__inputs.title"
+          label: Title
+          type: string
+          constraints: { maxLength: 5 }
+          writable_by: [operator]
+      defaults:
+        "__inputs.title": ""
+
+steps:
+  - kind: client-sends
+    frame:
+      v: 1
+      type: subscribe
+      token: $TOKEN_OPERATOR
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: snapshot
+      seq: 1
+      scene_id: t
+      scene_version: $BUNDLE.title-bundle.hash
+      state:
+        "__inputs.title": ""
+
+  - kind: client-sends
+    frame:
+      v: 1
+      type: input
+      patches:
+        - { path: "__inputs.title", value: "this is way too long" }
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: error
+      seq: $ANY
+      code: INVALID_VALUE
+      message: $ANY
+      recoverable: true
+
+  - kind: expect-server-state
+    state:
+      "__inputs.title": ""

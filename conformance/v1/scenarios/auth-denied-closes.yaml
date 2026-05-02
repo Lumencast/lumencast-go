@@ -1,0 +1,27 @@
+name: auth-denied-closes
+description: Server rejects subscribe with invalid token via AUTH_DENIED error and closes the connection.
+tag: required
+target: server
+spec_refs:
+  - LSDP-1#8-authentication--token-rotation
+  - ERROR-CODES#auth_denied
+
+steps:
+  - kind: client-sends
+    frame:
+      v: 1
+      type: subscribe
+      token: $TOKEN_INVALID
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: error
+      seq: $ANY
+      code: AUTH_DENIED
+      message: $ANY
+      recoverable: false
+
+  - kind: expect-client-action
+    action: close-with-reason
+    reason: $ANY

@@ -1,0 +1,59 @@
+name: seq-resets-on-scene-changed
+description: After scene_changed, the next snapshot resets seq to 1. Old state is fully replaced.
+tag: required
+target: runtime
+spec_refs:
+  - LSDP-1#3.3-scene_changed
+  - LSDP-1#5-sequencing
+
+steps:
+  - kind: client-sends
+    frame:
+      v: 1
+      type: subscribe
+      token: $TOKEN_OPERATOR
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: snapshot
+      seq: 1
+      scene_id: scene-a
+      scene_version: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      state:
+        a: 1
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: delta
+      seq: 2
+      patches:
+        - { path: a, value: 2 }
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: scene_changed
+      seq: 3
+      scene_id: scene-b
+      scene_version: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
+  - kind: expect-client-action
+    action: fetch-bundle
+    scene_version: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: snapshot
+      seq: 1
+      scene_id: scene-b
+      scene_version: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      state:
+        b: 100
+
+  # Old paths gone, new state in place.
+  - kind: expect-runtime-state
+    state:
+      b: 100

@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "type": "error",
+  "seq": 12,
+  "code": "RATE_LIMIT",
+  "message": "input rate exceeds 60/sec ; backoff suggested",
+  "recoverable": true
+}

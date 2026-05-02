@@ -1,0 +1,61 @@
+name: token-rotation-no-flicker
+description: Calling setToken() opens a new WebSocket and atomically swaps the store, without unmounting the React tree (state preserved across the swap).
+tag: required
+target: runtime
+spec_refs:
+  - LSDP-1#8-authentication--token-rotation
+
+steps:
+  - kind: client-sends
+    frame:
+      v: 1
+      type: subscribe
+      token: $TOKEN_OPERATOR
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: snapshot
+      seq: 1
+      scene_id: t
+      scene_version: $ANY_HASH
+      state:
+        title: Original
+        count: 5
+
+  - kind: expect-runtime-state
+    state:
+      title: Original
+      count: 5
+
+  # Trigger setToken via a runner-side instruction. The runtime opens a
+  # new WebSocket with the rotated token while keeping the old open.
+  - kind: client-action
+    action: setToken
+    token: $TOKEN_OPERATOR_ROTATED
+
+  # Expect a NEW subscribe on a NEW connection with the new token.
+  - kind: client-sends
+    on_connection: new
+    frame:
+      v: 1
+      type: subscribe
+      token: $TOKEN_OPERATOR_ROTATED
+
+  - kind: server-sends
+    on_connection: new
+    frame:
+      v: 1
+      type: snapshot
+      seq: 1
+      scene_id: t
+      scene_version: $ANY_HASH
+      state:
+        title: Original
+        count: 5
+
+  # State preserved through rotation — no flicker.
+  - kind: expect-runtime-state
+    state:
+      title: Original
+      count: 5

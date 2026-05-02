@@ -1,0 +1,43 @@
+name: viewer-cannot-input
+description: Viewer-role connections cannot send input frames. Server responds with WRITE_FORBIDDEN error and keeps the connection open (recoverable).
+tag: required
+target: server
+spec_refs:
+  - LSDP-1#9-roles--write-authority
+  - ERROR-CODES#write_forbidden
+
+steps:
+  - kind: client-sends
+    frame:
+      v: 1
+      type: subscribe
+      token: $TOKEN_VIEWER
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: snapshot
+      seq: 1
+      scene_id: $ANY
+      scene_version: $ANY_HASH
+      state: {}
+
+  - kind: client-sends
+    frame:
+      v: 1
+      type: input
+      patches:
+        - { path: "__inputs.title", value: "Hacker" }
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: error
+      seq: $ANY
+      code: WRITE_FORBIDDEN
+      message: $ANY
+      recoverable: true
+
+  # Connection MUST stay open after a recoverable error.
+  - kind: expect-no-frame-for
+    duration_ms: 200

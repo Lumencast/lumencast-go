@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "type": "delta",
+  "seq": 3,
+  "patches": [
+    { "path": "score.home", "value": 2 },
+    { "path": "score.away", "value": 1 },
+    { "path": "title", "value": "Match Point" }
+  ]
+}

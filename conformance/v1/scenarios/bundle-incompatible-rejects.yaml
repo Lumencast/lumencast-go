@@ -1,0 +1,42 @@
+name: bundle-incompatible-rejects
+description: Runtime receiving a bundle with a major schema version exceeding its supported max emits BUNDLE_INCOMPATIBLE via onError and stops.
+tag: required
+target: runtime
+spec_refs:
+  - LSML-1#15-versioning--compatibility
+  - ERROR-CODES#bundle_incompatible
+
+bundles:
+  - id: future-bundle
+    inline:
+      lsml: "2.0"
+      scene_id: future
+      scene_version: sha256:f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9
+      layout:
+        kind: frame
+        size: { w: 1920, h: 1080 }
+        children: []
+
+steps:
+  - kind: client-sends
+    frame:
+      v: 1
+      type: subscribe
+      token: $TOKEN_OPERATOR
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: snapshot
+      seq: 1
+      scene_id: future
+      scene_version: $BUNDLE.future-bundle.hash
+      state: {}
+
+  - kind: expect-client-action
+    action: fetch-bundle
+    scene_version: $BUNDLE.future-bundle.hash
+
+  - kind: expect-client-action
+    action: onError
+    code: BUNDLE_INCOMPATIBLE

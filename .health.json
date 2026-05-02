@@ -1,0 +1,51 @@
+{
+  "project": "lumencast-go",
+  "version": "0.0.0-dev",
+  "last_check": "2026-05-03T01:16:00Z",
+  "status": "green",
+  "errors": [],
+  "warnings": [
+    {
+      "code": "PRE_RELEASE",
+      "level": "info",
+      "message": "Pre-v0.1.0. Tag pending : (1) goreleaser snapshot validation, (2) cross-SDK interop check against -js."
+    }
+  ],
+  "checks": {
+    "build": "ok",
+    "vet": "ok",
+    "staticcheck": "ok",
+    "golangci_lint": "ok",
+    "race_tests": "skipped_local_no_cgo",
+    "tests": "ok",
+    "conformance": "ok",
+    "secrets": "ok",
+    "cli_binary_size_mib": 7.7,
+    "cli_binary_size_budget_mib": 20
+  },
+  "conformance_summary": {
+    "total_scenarios": 16,
+    "executed": 8,
+    "passed": 8,
+    "skipped": 8,
+    "skip_reasons": {
+      "target_runtime": [
+        "bundle-incompatible-rejects",
+        "delta-multiple-patches-atomic",
+        "delta-replay-tolerated",
+        "seq-gap-triggers-reconnect",
+        "seq-resets-on-scene-changed",
+        "unknown-frame-type-ignored"
+      ],
+      "harness_features_pending": [
+        "subscribe-snapshot-delta",
+        "token-rotation-no-flicker"
+      ]
+    }
+  },
+  "post_v0_features_landed": [
+    "conformance: bundles inline + $BUNDLE.<id>.hash placeholder substitution",
+    "server: SetActive migrates live subscribers with SceneChanged + fresh Snapshot at seq=1",
+    "adapters: first-class pgx LISTEN/NOTIFY helper (PgxListen)"
+  ]
+}

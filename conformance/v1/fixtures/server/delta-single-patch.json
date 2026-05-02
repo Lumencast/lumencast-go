@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "type": "delta",
+  "seq": 2,
+  "patches": [
+    { "path": "score.home", "value": 1 }
+  ]
+}

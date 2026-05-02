@@ -1,0 +1,44 @@
+name: unknown-frame-type-ignored
+description: Runtime tolerates an unknown frame type silently (forward compatibility).
+tag: recommended
+target: runtime
+spec_refs:
+  - LSDP-1#13-versioning--compatibility
+
+steps:
+  - kind: client-sends
+    frame:
+      v: 1
+      type: subscribe
+      token: $TOKEN_OPERATOR
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: snapshot
+      seq: 1
+      scene_id: t
+      scene_version: $ANY_HASH
+      state:
+        x: 1
+
+  # Unknown frame type — runtime should ignore.
+  - kind: server-sends
+    frame:
+      v: 1
+      type: future_unknown_kind
+      seq: 2
+      payload: anything
+
+  - kind: server-sends
+    frame:
+      v: 1
+      type: delta
+      seq: 3
+      patches:
+        - { path: x, value: 2 }
+
+  # State must reflect the delta — runtime didn't choke on the unknown frame.
+  - kind: expect-runtime-state
+    state:
+      x: 2

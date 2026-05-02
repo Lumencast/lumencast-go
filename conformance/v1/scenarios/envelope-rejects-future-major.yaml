@@ -1,0 +1,17 @@
+name: envelope-rejects-future-major
+description: Server receiving a subscribe with v != 1 from a v1-only server closes with protocol error 1002.
+tag: required
+target: server
+spec_refs:
+  - LSDP-1#13-versioning--compatibility
+
+steps:
+  - kind: client-sends
+    frame:
+      v: 2
+      type: subscribe
+      token: $TOKEN_OPERATOR
+
+  - kind: expect-client-action
+    action: close-with-reason
+    reason: $ANY

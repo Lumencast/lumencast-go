@@ -1,0 +1,42 @@
+run:
+  timeout: 5m
+  go: "1.22"
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - revive
+    - gocritic
+    - gosec
+
+linters-settings:
+  gosec:
+    excludes:
+      # G115 — integer overflow conversions are pervasive in
+      # protocol code where seq is uint64 and JSON numbers are float64.
+      - G115
+      # G306 — 0o644 is correct for human-readable scaffold output
+      # and CLI build artefacts ; locking these to 0o600 would
+      # surprise users.
+      - G306
+  revive:
+    rules:
+      - name: package-comments
+        disabled: true
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+    - path: examples/
+      linters:
+        - gosec
