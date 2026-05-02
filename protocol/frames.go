@@ -14,7 +14,7 @@ type Snapshot struct {
 	V            int                        `json:"v"`
 	Type         string                     `json:"type"`
 	Seq          uint64                     `json:"seq"`
-	Ts           string                     `json:"ts,omitempty"`
+	TS           string                     `json:"ts,omitempty"`
 	SceneID      string                     `json:"scene_id"`
 	SceneVersion string                     `json:"scene_version"`
 	State        map[string]json.RawMessage `json:"state"`
@@ -30,7 +30,7 @@ type Delta struct {
 	V       int     `json:"v"`
 	Type    string  `json:"type"`
 	Seq     uint64  `json:"seq"`
-	Ts      string  `json:"ts,omitempty"`
+	TS      string  `json:"ts,omitempty"`
 	Patches []Patch `json:"patches"`
 }
 
@@ -48,7 +48,7 @@ type SceneChanged struct {
 	V            int    `json:"v"`
 	Type         string `json:"type"`
 	Seq          uint64 `json:"seq"`
-	Ts           string `json:"ts,omitempty"`
+	TS           string `json:"ts,omitempty"`
 	SceneID      string `json:"scene_id"`
 	SceneVersion string `json:"scene_version"`
 }
@@ -60,7 +60,7 @@ type Error struct {
 	V           int    `json:"v"`
 	Type        string `json:"type"`
 	Seq         uint64 `json:"seq"`
-	Ts          string `json:"ts,omitempty"`
+	TS          string `json:"ts,omitempty"`
 	Code        string `json:"code"`
 	Message     string `json:"message"`
 	Recoverable bool   `json:"recoverable"`

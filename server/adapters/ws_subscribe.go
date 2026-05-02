@@ -79,7 +79,7 @@ func wsRunOnce(ctx context.Context, scene *server.Scene, cfg WSSubscribeConfig) 
 	if err != nil {
 		return fmt.Errorf("ws dial: %w", err)
 	}
-	defer c.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = c.Close(websocket.StatusNormalClosure, "") }()
 
 	for {
 		mt, data, err := c.Read(ctx)
