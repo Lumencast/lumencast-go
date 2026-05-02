@@ -1,12 +1,16 @@
+# golangci-lint v2 config — migrated from v1 schema for the
+# golangci-lint-action@v8 (which only supports v2.1+).
+# Spec : https://golangci-lint.run/usage/configuration/
+
+version: "2"
+
 run:
   timeout: 5m
-  go: "1.22"
 
 linters:
-  disable-all: true
+  default: none
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
@@ -15,28 +19,26 @@ linters:
     - revive
     - gocritic
     - gosec
-
-linters-settings:
-  gosec:
-    excludes:
-      # G115 — integer overflow conversions are pervasive in
-      # protocol code where seq is uint64 and JSON numbers are float64.
-      - G115
-      # G306 — 0o644 is correct for human-readable scaffold output
-      # and CLI build artefacts ; locking these to 0o600 would
-      # surprise users.
-      - G306
-  revive:
+  settings:
+    gosec:
+      excludes:
+        # G115 — integer overflow conversions are pervasive in
+        # protocol code where seq is uint64 and JSON numbers are float64.
+        - G115
+        # G306 — 0o644 is correct for human-readable scaffold output
+        # and CLI build artefacts ; locking these to 0o600 would
+        # surprise users.
+        - G306
+    revive:
+      rules:
+        - name: package-comments
+          disabled: true
+  exclusions:
     rules:
-      - name: package-comments
-        disabled: true
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gosec
-        - errcheck
-    - path: examples/
-      linters:
-        - gosec
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+      - path: examples/
+        linters:
+          - gosec
