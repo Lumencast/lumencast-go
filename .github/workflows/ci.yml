@@ -54,7 +54,12 @@ jobs:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.1.6
+          # 'latest' tracks the most recent v2.x release, built with a
+          # current Go toolchain. Pinned earlier versions were built
+          # with Go 1.24 and refuse to lint Go 1.25 sources :
+          # "the Go language version (go1.24) used to build golangci-
+          # lint is lower than the targeted Go version (1.25.0)".
+          version: latest
 
   secret-scan:
     name: Secret scan
