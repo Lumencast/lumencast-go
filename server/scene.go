@@ -27,8 +27,17 @@ type Scene struct {
 	version string
 	store   *store
 
-	mu          sync.Mutex
-	seq         *protocol.SequenceTracker
+	mu sync.Mutex
+	// seq is the per-scene monotonic counter (LSDP/1.1 §18.1.1). All
+	// concurrent subscribers see the same seq value on a given delta ;
+	// late-joining subscribers receive a snapshot whose seq matches
+	// this counter, NOT seq=1. The first emission on a fresh scene
+	// returns seq=1 from NextServer.
+	seq *protocol.SequenceTracker
+	// replay holds the recent (seq, patches, cause) emissions so a 1.1
+	// client reconnecting with `since_sequence` can resume without a
+	// fresh snapshot (LSDP/1.1 §18.1).
+	replay      *replayBuffer
 	subscribers map[*subscription]struct{}
 
 	// declaredInputs is the subset of __inputs.* paths the scene
@@ -103,11 +112,19 @@ type InputSpec struct {
 // newScene constructs a fresh Scene. Call NewScene on a Server to
 // register one with the kit.
 func newScene(id string, opts ...SceneOption) *Scene {
+	seq := protocol.NewSequenceTracker()
+	// Pre-seed the scene seq to 1 so the very first subscriber's
+	// snapshot ships at seq=1 (matching the LSDP/1.0 baseline that all
+	// existing conformance scenarios assume). Subsequent deltas
+	// increment to 2, 3, etc. Late-joining subscribers see the
+	// current value, not 1.
+	seq.NextServer()
 	s := &Scene{
 		id:          id,
 		version:     defaultSceneVersion,
 		store:       newStore(),
-		seq:         protocol.NewSequenceTracker(),
+		seq:         seq,
+		replay:      newReplayBuffer(DefaultReplayBufferSize),
 		subscribers: make(map[*subscription]struct{}),
 	}
 	for _, opt := range opts {
@@ -185,8 +202,12 @@ func (s *Scene) emitWithCause(patches map[string]any, cause *protocol.Cause) err
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// LSDP/1.1 §18.1.1 — per-scene monotonic seq. All concurrent
+	// subscribers receive the same delta with the same seq.
+	seq := s.seq.NextServer()
+	s.replay.push(seq, wirePatches, cause)
 	for sub := range s.subscribers {
-		s.sendDelta(sub, wirePatches, cause)
+		s.sendDelta(sub, seq, wirePatches, cause)
 	}
 	return nil
 }
@@ -194,20 +215,22 @@ func (s *Scene) emitWithCause(patches map[string]any, cause *protocol.Cause) err
 // sendDelta enqueues a Delta on a subscription, falling back to a
 // fresh Snapshot if the buffer is full (back-pressure protection).
 // Caller MUST hold s.mu.
-func (s *Scene) sendDelta(sub *subscription, patches []protocol.Patch, cause *protocol.Cause) {
+func (s *Scene) sendDelta(sub *subscription, seq uint64, patches []protocol.Patch, cause *protocol.Cause) {
 	d := &protocol.Delta{
-		Seq:     sub.seq.NextServer(),
+		Seq:     seq,
 		Patches: patches,
 		Cause:   cause,
 	}
 	select {
 	case sub.out <- d:
 	default:
-		// Buffer full : drop into snapshot recovery. Reset seq, ship
-		// snapshot at seq=1.
-		sub.seq.Reset()
+		// Buffer full : drop into snapshot recovery. Under the per-scene
+		// seq model (§18.1.1), the snapshot ships at the current scene
+		// seq — the subscriber rebases via ObserveSnapshot and continues
+		// from there. We do NOT reset the scene seq (other subscribers
+		// keep advancing fine).
 		snap := &protocol.Snapshot{
-			Seq:          sub.seq.NextServer(),
+			Seq:          s.seq.Current(),
 			SceneID:      s.id,
 			SceneVersion: s.version,
 			State:        s.store.snapshot(),
@@ -228,10 +251,10 @@ func (s *Scene) refreshAll() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state := s.store.snapshot()
+	curSeq := s.seq.Current()
 	for sub := range s.subscribers {
-		sub.seq.Reset()
 		snap := &protocol.Snapshot{
-			Seq:          sub.seq.NextServer(),
+			Seq:          curSeq,
 			SceneID:      s.id,
 			SceneVersion: s.version,
 			State:        state,
@@ -380,25 +403,48 @@ func (s *Scene) checkConstraint(path string, raw json.RawMessage) error {
 // live=true marks the subscription as following the server's active
 // scene (it MUST be migrated on SetActive).
 func (s *Scene) subscribe(buffer int, live bool) (*subscription, *protocol.Snapshot) {
+	sub, snap, _ := s.subscribeWithResume(buffer, live, 0)
+	return sub, snap
+}
+
+// subscribeWithResume is the LSDP/1.1 entry point — same as subscribe,
+// but honours the optional `since_sequence` field (§4.1, §18). When the
+// replay buffer covers the gap, the returned `replay` slice contains
+// the deltas to ship in lieu of a snapshot. Otherwise the returned
+// snapshot carries the current scene seq and `replay` is nil.
+//
+// The caller MUST send EITHER the snapshot OR the replay deltas — never
+// both. snap is non-nil iff replay is nil.
+func (s *Scene) subscribeWithResume(buffer int, live bool, sinceSequence uint64) (*subscription, *protocol.Snapshot, []replayRecord) {
 	if buffer < 1 {
 		buffer = 64
 	}
 	sub := &subscription{
-		seq:  protocol.NewSequenceTracker(),
 		out:  make(chan any, buffer),
 		live: live,
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.subscribers[sub] = struct{}{}
+	curSeq := s.seq.Current()
+
+	// If the client requested resume AND the buffer covers the gap, the
+	// server SHOULD ship a delta stream from sinceSequence+1 forward
+	// instead of a fresh snapshot (§18.1.1 + §18.2).
+	if sinceSequence > 0 && sinceSequence <= curSeq {
+		if records, covered := s.replay.since(sinceSequence); covered {
+			return sub, nil, records
+		}
+	}
+
 	state := s.store.snapshot()
 	snap := &protocol.Snapshot{
-		Seq:          sub.seq.NextServer(),
+		Seq:          curSeq,
 		SceneID:      s.id,
 		SceneVersion: s.version,
 		State:        state,
 	}
-	return sub, snap
+	return sub, snap, nil
 }
 
 // unsubscribe detaches a subscriber. Idempotent.
@@ -419,7 +465,9 @@ func (s *Scene) unsubscribe(sub *subscription) {
 // field on the Subscribe frame) and therefore follows whatever scene
 // is currently active on the server. SetActive migrates these.
 type subscription struct {
-	seq    *protocol.SequenceTracker
+	// out is the per-subscriber outgoing queue. The scene-level seq
+	// counter is shared across all subscribers (LSDP/1.1 §18.1.1) ;
+	// subscriptions don't carry their own counter.
 	out    chan any
 	closed bool
 	stale  bool

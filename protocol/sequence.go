@@ -5,12 +5,15 @@ import (
 	"sync"
 )
 
-// SequenceTracker is a goroutine-safe per-subscription counter that
-// implements the LSDP/1 sequencing rules :
+// SequenceTracker is a goroutine-safe counter that implements the
+// LSDP/1.x sequencing rules :
 //
-//   - Snapshot starts a subscription with seq = 1.
+//   - The first frame of a subscription establishes the baseline. Under
+//     1.0 it was always seq = 1 ; under 1.1 (per spec §18.1.1) it can
+//     be any value because seq is per-scene, not per-subscription.
 //   - Each subsequent Delta / SceneChanged / Error increments by 1.
-//   - SceneChanged is followed by a fresh Snapshot at seq = 1.
+//   - A snapshot frame received mid-stream resets the baseline (used
+//     after SceneChanged or back-pressure recovery).
 //
 // On the receiver side, ObserveServer detects gaps (seq > last + 1)
 // and returns ErrGap so the caller can close + reconnect with a
@@ -26,8 +29,10 @@ type SequenceTracker struct {
 var ErrGap = errors.New("protocol: sequence gap")
 
 // ErrInvalidSeqStart is returned by ObserveServer if the first frame
-// of a subscription does not carry seq == 1.
-var ErrInvalidSeqStart = errors.New("protocol: subscription must start at seq=1")
+// of a subscription carries seq == 0. (Under 1.0 the constraint was
+// stricter — first frame must be seq == 1 ; relaxed in 1.1 to accept
+// any positive value.)
+var ErrInvalidSeqStart = errors.New("protocol: subscription must start at seq>=1")
 
 // NewSequenceTracker returns a tracker with cur = 0 (no frame seen).
 func NewSequenceTracker() *SequenceTracker {
@@ -67,19 +72,20 @@ func (s *SequenceTracker) Current() uint64 {
 //   - ErrGap : seq > last+1, caller MUST close and reconnect.
 //   - nil with skip=true : seq <= last, replay — caller MUST drop frame.
 //
-// The tracker also accepts seq == 1 unconditionally (handles fresh
-// Snapshot after SceneChanged or reconnect).
+// The first call on a fresh tracker accepts any seq >= 1 as the
+// baseline (see [SequenceTracker] doc — under 1.1, scene seq is global
+// so late-joining subscribers may start at seq > 1).
 func (s *SequenceTracker) ObserveServer(seq uint64) (skip bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch {
-	case seq == 1:
-		// Fresh subscription / scene_changed — reset baseline.
-		s.cur = 1
-		return false, nil
 	case s.cur == 0:
-		// First non-1 frame on a tracker that never saw seq=1.
-		return false, ErrInvalidSeqStart
+		// Fresh tracker — any seq >= 1 establishes the baseline.
+		if seq < 1 {
+			return false, ErrInvalidSeqStart
+		}
+		s.cur = seq
+		return false, nil
 	case seq == s.cur+1:
 		s.cur = seq
 		return false, nil
@@ -88,4 +94,18 @@ func (s *SequenceTracker) ObserveServer(seq uint64) (skip bool, err error) {
 	default:
 		return false, ErrGap
 	}
+}
+
+// ObserveSnapshot resets the tracker to the seq carried by a snapshot
+// frame. Use this when receiving a snapshot after a SceneChanged or
+// back-pressure recovery — the seq baseline jumps to the snapshot
+// value regardless of previous state.
+func (s *SequenceTracker) ObserveSnapshot(seq uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if seq < 1 {
+		return ErrInvalidSeqStart
+	}
+	s.cur = seq
+	return nil
 }
