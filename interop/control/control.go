@@ -89,6 +89,15 @@ func (p *Plane) handleSetup(w http.ResponseWriter, r *http.Request) {
 	p.installTokens(req.Tokens)
 
 	primary := req.Bundles[0]
+	// `inline.scene_id` overrides bundle.id when present (per
+	// CONTROL.md "Inline bundle parsing"). The bundle.id is the
+	// scenario-local reference name used in $BUNDLE.<id>.hash
+	// placeholders ; the inline LSML carries the canonical
+	// server-side scene identifier.
+	effectiveID := primary.ID
+	if v, ok := primary.Inline["scene_id"].(string); ok && v != "" {
+		effectiveID = v
+	}
 	opts := []server.SceneOption{}
 	if primary.Hash != "" {
 		opts = append(opts, server.WithSceneVersion(primary.Hash))
@@ -96,7 +105,7 @@ func (p *Plane) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if specs := extractInputSpecs(primary.Inline); len(specs) > 0 {
 		opts = append(opts, server.WithOperatorInputs(specs))
 	}
-	scene := p.srv.NewScene(primary.ID, opts...)
+	scene := p.srv.NewScene(effectiveID, opts...)
 
 	// initial_state takes precedence ; fall back to inline.defaults
 	// for scenarios that declare a bundle with seeded values rather
@@ -114,28 +123,32 @@ func (p *Plane) handleSetup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := p.srv.SetActive(primary.ID); err != nil {
+	if err := p.srv.SetActive(effectiveID); err != nil {
 		writeProblem(w, http.StatusInternalServerError, "set-active", err.Error())
 		return
 	}
 
 	// Register secondary bundles (for bundle-incompatible negotiation
 	// or alternate scenes). They start empty ; harnesses populate via
-	// /test/emit if needed.
+	// /test/emit if needed. Same inline.scene_id override applies.
 	for _, b := range req.Bundles[1:] {
-		sc := p.srv.NewScene(b.ID)
+		secID := b.ID
+		if v, ok := b.Inline["scene_id"].(string); ok && v != "" {
+			secID = v
+		}
+		sc := p.srv.NewScene(secID)
 		if b.Hash != "" {
 			sc.SetVersion(b.Hash)
 		}
 	}
 
 	p.mu.Lock()
-	p.active = primary.ID
+	p.active = effectiveID
 	p.mu.Unlock()
 
 	writeJSON(w, http.StatusOK, setupResponse{
 		WSUrl:        p.wsBase,
-		SceneID:      primary.ID,
+		SceneID:      effectiveID,
 		SceneVersion: primary.Hash,
 	})
 }
