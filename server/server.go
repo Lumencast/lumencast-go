@@ -229,6 +229,25 @@ func (s *Server) ActiveScene() *Scene {
 // unknown.
 var ErrSceneNotFound = errors.New("server: scene not found")
 
+// Reset drops every registered scene and clears active state. In-flight
+// subscribers are detached. Intended for test harnesses (interop
+// control plane) — not for production use.
+func (s *Server) Reset() {
+	s.mu.Lock()
+	scenes := s.scenes
+	s.scenes = make(map[string]*Scene)
+	s.active = ""
+	s.mu.Unlock()
+	for _, sc := range scenes {
+		sc.mu.Lock()
+		for sub := range sc.subscribers {
+			sub.close()
+		}
+		sc.subscribers = nil
+		sc.mu.Unlock()
+	}
+}
+
 // Mux returns a configured http.ServeMux exposing :
 //
 //   - /lsdp.v1                 — LSDP/1 WebSocket subscribe endpoint

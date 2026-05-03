@@ -8,6 +8,7 @@
 //	lumencast conformance [...] run the LSDP/1 conformance suite
 //	lumencast build [dir]       canonicalise + hash a bundle for prod
 //	lumencast serve <dir>       static-serve a bundle for testing
+//	lumencast serve-scenario    run with the interop test control plane
 //
 // All subcommands use the standard flag package ; -h shows help.
 package main
@@ -40,6 +41,8 @@ func main() {
 		os.Exit(cmdBuild(args))
 	case "serve":
 		os.Exit(cmdServe(args))
+	case "serve-scenario":
+		os.Exit(cmdServeScenario(args))
 	case "version", "--version", "-v":
 		fmt.Printf("lumencast %s\n", Version)
 	case "help", "-h", "--help":
@@ -64,6 +67,7 @@ Subcommands :
   conformance run the LSDP/1 conformance suite
   build      canonicalise + hash a bundle for production
   serve      static-serve a bundle directory
+  serve-scenario  run with the interop test control plane (CI use)
 
 Run "lumencast <subcommand> -h" for subcommand-specific help.`)
 }

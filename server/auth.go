@@ -162,6 +162,14 @@ func (s *StaticTokens) Delete(token string) {
 	delete(s.tokens, token)
 }
 
+// Reset removes every token mapping. Safe for concurrent use. Used by
+// the interop control plane between scenarios.
+func (s *StaticTokens) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tokens = map[string]Identity{}
+}
+
 // Authenticate implements Authenticator.
 func (s *StaticTokens) Authenticate(_ context.Context, token string) (Identity, error) {
 	s.mu.RLock()
