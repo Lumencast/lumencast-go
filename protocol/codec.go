@@ -68,6 +68,13 @@ func Encode(msg any) ([]byte, error) {
 		c := *m
 		c.V, c.Type = Version, TypeInput
 		return marshal(c)
+	case Unsubscribe:
+		m.V, m.Type = Version, TypeUnsubscribe
+		return marshal(m)
+	case *Unsubscribe:
+		c := *m
+		c.V, c.Type = Version, TypeUnsubscribe
+		return marshal(c)
 	default:
 		return nil, fmt.Errorf("protocol: cannot encode %T", msg)
 	}
@@ -103,9 +110,28 @@ func Decode(raw []byte) (any, error) {
 		}
 		return &m, nil
 	case TypePing:
-		return &Ping{V: Version, Type: TypePing}, nil
+		// Decode the full Ping struct so the optional Nonce
+		// (LSDP/1.1 §4.3) round-trips. 1.0 clients omit Nonce ;
+		// the field stays empty.
+		var m Ping
+		if err := unmarshal(raw, &m); err != nil {
+			return nil, err
+		}
+		return &m, nil
 	case TypePong:
-		return &Pong{V: Version, Type: TypePong}, nil
+		// Same treatment — 1.1 clients may also send Pong with a
+		// Nonce (servers can ping clients per spec §3.5).
+		var m Pong
+		if err := unmarshal(raw, &m); err != nil {
+			return nil, err
+		}
+		return &m, nil
+	case TypeUnsubscribe:
+		var m Unsubscribe
+		if err := unmarshal(raw, &m); err != nil {
+			return nil, err
+		}
+		return &m, nil
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnknownType, env.Type)
 	}
@@ -150,9 +176,18 @@ func DecodeServer(raw []byte) (any, error) {
 		}
 		return &m, nil
 	case TypePong:
-		return &Pong{V: Version, Type: TypePong}, nil
+		// Decode full Pong so the optional Nonce (1.1) round-trips.
+		var m Pong
+		if err := unmarshal(raw, &m); err != nil {
+			return nil, err
+		}
+		return &m, nil
 	case TypePing:
-		return &Ping{V: Version, Type: TypePing}, nil
+		var m Ping
+		if err := unmarshal(raw, &m); err != nil {
+			return nil, err
+		}
+		return &m, nil
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnknownType, env.Type)
 	}

@@ -369,3 +369,261 @@ func TestRole_Validity(t *testing.T) {
 		t.Fatal("unknown role must not be valid")
 	}
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// LSDP/1.1 — additive frame surface.
+// ──────────────────────────────────────────────────────────────────────
+
+func TestSubProtocolNegotiation(t *testing.T) {
+	if SubProtocol != "lsdp.v1" {
+		t.Fatalf("1.0 subprotocol drift: %s", SubProtocol)
+	}
+	if SubProtocolV1_1 != "lsdp.v1.1" {
+		t.Fatalf("1.1 subprotocol drift: %s", SubProtocolV1_1)
+	}
+	if len(SubProtocols) != 2 || SubProtocols[0] != SubProtocolV1_1 || SubProtocols[1] != SubProtocol {
+		t.Fatalf("preference order broken: %v", SubProtocols)
+	}
+}
+
+func TestSubscribeWithSinceSequence_RoundTrip(t *testing.T) {
+	in := Subscribe{Token: "t", SinceSequence: 12345}
+	raw, err := Encode(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"v":1,"type":"subscribe","token":"t","since_sequence":12345}`
+	if string(raw) != want {
+		t.Fatalf("\nwant: %s\n got: %s", want, raw)
+	}
+	msg, err := Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := msg.(*Subscribe)
+	if !ok {
+		t.Fatalf("decoded type %T", msg)
+	}
+	if got.SinceSequence != 12345 {
+		t.Fatalf("since_sequence not round-tripped: %d", got.SinceSequence)
+	}
+}
+
+func TestSubscribeWithoutSinceSequence_OmitsField(t *testing.T) {
+	// 1.0-compatible : zero SinceSequence MUST omit on the wire.
+	raw, err := Encode(Subscribe{Token: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "since_sequence") {
+		t.Fatalf("zero since_sequence leaked: %s", raw)
+	}
+}
+
+func TestInputWithClientMsgID_RoundTrip(t *testing.T) {
+	in := Input{
+		Patches:     []Patch{{Path: "x", Value: json.RawMessage(`1`)}},
+		ClientMsgID: "ui-9f3a",
+	}
+	raw, err := Encode(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"v":1,"type":"input","patches":[{"path":"x","value":1}],"client_msg_id":"ui-9f3a"}`
+	if string(raw) != want {
+		t.Fatalf("\nwant: %s\n got: %s", want, raw)
+	}
+	msg, err := Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := msg.(*Input)
+	if got.ClientMsgID != "ui-9f3a" {
+		t.Fatalf("client_msg_id not round-tripped: %q", got.ClientMsgID)
+	}
+}
+
+func TestPingPongNonce_RoundTrip(t *testing.T) {
+	rawPing, _ := Encode(Ping{Nonce: "probe-7a2c"})
+	if !strings.Contains(string(rawPing), `"nonce":"probe-7a2c"`) {
+		t.Fatalf("ping nonce missing on wire: %s", rawPing)
+	}
+	msg, err := Decode(rawPing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := msg.(*Ping).Nonce; got != "probe-7a2c" {
+		t.Fatalf("ping nonce not round-tripped: %q", got)
+	}
+
+	rawPong, _ := Encode(Pong{Nonce: "probe-7a2c"})
+	if !strings.Contains(string(rawPong), `"nonce":"probe-7a2c"`) {
+		t.Fatalf("pong nonce missing on wire: %s", rawPong)
+	}
+	msg, err = DecodeServer(rawPong)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := msg.(*Pong).Nonce; got != "probe-7a2c" {
+		t.Fatalf("pong nonce not round-tripped: %q", got)
+	}
+
+	// 1.0-compat : empty nonce omitted from wire.
+	rawBare, _ := Encode(Pong{})
+	if string(rawBare) != `{"v":1,"type":"pong"}` {
+		t.Fatalf("bare pong leaked nonce: %s", rawBare)
+	}
+}
+
+func TestUnsubscribe_RoundTrip(t *testing.T) {
+	raw, err := Encode(Unsubscribe{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"v":1,"type":"unsubscribe"}`
+	if string(raw) != want {
+		t.Fatalf("\nwant: %s\n got: %s", want, raw)
+	}
+	msg, err := Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := msg.(*Unsubscribe); !ok {
+		t.Fatalf("decoded type %T (want *Unsubscribe)", msg)
+	}
+}
+
+func TestDeltaWithCauseAndTransition_RoundTrip(t *testing.T) {
+	in := Delta{
+		Seq: 7,
+		Patches: []Patch{
+			{
+				Path:  "score",
+				Value: json.RawMessage(`42`),
+				Transition: &TransitionSpec{
+					Kind:       "tween",
+					DurationMs: 500,
+					Easing:     "ease-out",
+				},
+			},
+		},
+		Cause: &Cause{Source: "operator:alice", InputID: "ui-9f3a"},
+	}
+	raw, err := Encode(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"transition":{"kind":"tween"`) {
+		t.Fatalf("transition not encoded: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"cause":{"source":"operator:alice"`) {
+		t.Fatalf("cause not encoded: %s", raw)
+	}
+	msg, err := DecodeServer(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := msg.(*Delta)
+	if got.Cause == nil || got.Cause.InputID != "ui-9f3a" {
+		t.Fatalf("cause.input_id not round-tripped: %+v", got.Cause)
+	}
+	if got.Patches[0].Transition == nil || got.Patches[0].Transition.Kind != "tween" {
+		t.Fatalf("transition not round-tripped: %+v", got.Patches[0].Transition)
+	}
+}
+
+func TestSceneChangedWithTransition_RoundTrip(t *testing.T) {
+	in := SceneChanged{
+		Seq:          100,
+		SceneID:      "scene-b",
+		SceneVersion: "sha256:b0",
+		FromSceneID:  "scene-a",
+		Transition:   &SceneTransition{Kind: "crossfade", DurationMs: 600},
+	}
+	raw, err := Encode(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"from_scene_id":"scene-a"`) {
+		t.Fatalf("from_scene_id missing: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"transition":{"kind":"crossfade","duration_ms":600}`) {
+		t.Fatalf("transition missing or wrong: %s", raw)
+	}
+	msg, err := DecodeServer(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := msg.(*SceneChanged)
+	if got.FromSceneID != "scene-a" {
+		t.Fatalf("from_scene_id not round-tripped: %q", got.FromSceneID)
+	}
+	if got.Transition == nil || got.Transition.Kind != "crossfade" || got.Transition.DurationMs != 600 {
+		t.Fatalf("transition not round-tripped: %+v", got.Transition)
+	}
+}
+
+func TestBackwardCompat_1_0_BundlesStillEncode(t *testing.T) {
+	// A pure-1.0 caller (no 1.1 fields populated) MUST produce the
+	// exact same bytes as before. Regression check.
+	in := Subscribe{Token: "t"}
+	raw, _ := Encode(in)
+	want := `{"v":1,"type":"subscribe","token":"t"}`
+	if string(raw) != want {
+		t.Fatalf("1.0 subscribe shape changed:\nwant: %s\n got: %s", want, raw)
+	}
+
+	in2 := Delta{Seq: 1, Patches: []Patch{{Path: "x", Value: json.RawMessage(`1`)}}}
+	raw, _ = Encode(in2)
+	want = `{"v":1,"type":"delta","seq":1,"patches":[{"path":"x","value":1}]}`
+	if string(raw) != want {
+		t.Fatalf("1.0 delta shape changed:\nwant: %s\n got: %s", want, raw)
+	}
+}
+
+func TestForwardCompat_1_0Server_Ignores_1_1_Fields(t *testing.T) {
+	// A 1.0 client receiving a 1.1 frame with optional fields SHOULD
+	// decode it cleanly (the additional fields are tolerated by Go's
+	// stdlib JSON decoder by default — they go into nil pointers).
+	raw := []byte(`{"v":1,"type":"delta","seq":1,"patches":[{"path":"x","value":1}],"cause":{"source":"adapter:http_poll"}}`)
+	msg, err := DecodeServer(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := msg.(*Delta)
+	if got.Seq != 1 || len(got.Patches) != 1 {
+		t.Fatal("1.0-only fields lost")
+	}
+	if got.Cause == nil || got.Cause.Source != "adapter:http_poll" {
+		t.Fatalf("optional cause not decoded: %+v", got.Cause)
+	}
+}
+
+// Bundle-shape preservation : ensure the bytes JSON consumers see for
+// 1.0 frames have not drifted because we added omitempty fields to
+// every struct.
+func TestNoUnintendedFieldLeak(t *testing.T) {
+	cases := []struct {
+		in   any
+		want string
+	}{
+		{Snapshot{Seq: 1, SceneID: "s", SceneVersion: "sha256:0", State: map[string]json.RawMessage{}},
+			`{"v":1,"type":"snapshot","seq":1,"scene_id":"s","scene_version":"sha256:0","state":{}}`},
+		{Pong{}, `{"v":1,"type":"pong"}`},
+		{Ping{}, `{"v":1,"type":"ping"}`},
+		{Subscribe{Token: "t"}, `{"v":1,"type":"subscribe","token":"t"}`},
+		{Input{Patches: []Patch{{Path: "x", Value: json.RawMessage(`1`)}}},
+			`{"v":1,"type":"input","patches":[{"path":"x","value":1}]}`},
+		{SceneChanged{Seq: 1, SceneID: "s", SceneVersion: "sha256:0"},
+			`{"v":1,"type":"scene_changed","seq":1,"scene_id":"s","scene_version":"sha256:0"}`},
+	}
+	for _, tc := range cases {
+		raw, err := Encode(tc.in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(raw) != tc.want {
+			t.Errorf("\nwant: %s\n got: %s", tc.want, raw)
+		}
+	}
+}
