@@ -239,11 +239,17 @@ func decodeProblem(resp *http.Response, op string) error {
 }
 
 // setupRequest mirrors the body shape from CONTROL.md § POST /test/setup.
+//
+// Note on omitempty : nil maps marshal as JSON `null`. Older / stricter
+// SDK control planes reject `null` with 422 Unprocessable Entity for
+// fields they expect as objects. omitempty makes the field absent
+// instead, matching the spec's "MUST accept null, omitted, or empty
+// for any of these fields" robustness clause.
 type setupRequest struct {
 	Scenario     string            `json:"scenario"`
-	Tokens       map[string]string `json:"tokens"`
-	Bundles      []setupBundle     `json:"bundles"`
-	InitialState map[string]any    `json:"initial_state"`
+	Tokens       map[string]string `json:"tokens,omitempty"`
+	Bundles      []setupBundle     `json:"bundles,omitempty"`
+	InitialState map[string]any    `json:"initial_state,omitempty"`
 }
 
 type setupBundle struct {

@@ -79,6 +79,7 @@ type StepKind string
 const (
 	StepClientSends         StepKind = "client-sends"
 	StepServerSends         StepKind = "server-sends"
+	StepServerEmits         StepKind = "server-emits"
 	StepExpectRuntimeState  StepKind = "expect-runtime-state"
 	StepExpectServerState   StepKind = "expect-server-state"
 	StepExpectNoFrameFor    StepKind = "expect-no-frame-for"

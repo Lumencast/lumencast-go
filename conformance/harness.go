@@ -70,6 +70,18 @@ type BundleAwareDriver interface {
 	OnBundles(scenarioName string, bundles []ResolvedBundle) error
 }
 
+// EmittingDriver is an optional extension required by scenarios that
+// use the `server-emits` step kind. The harness calls Emit(patches)
+// to trigger a server-driven delta before reading the next frame.
+//
+// In-process drivers wired to a real server typically forward to
+// Scene.Emit ; HTTP-driven drivers POST to the control plane's
+// /test/emit endpoint.
+type EmittingDriver interface {
+	Driver
+	Emit(patches []map[string]any) error
+}
+
 // ResolvedBundle is the Driver-friendly view of a scenario bundle :
 // the inline LSML body plus the computed sha256:<hex> hash.
 type ResolvedBundle struct {
@@ -267,6 +279,8 @@ func (e *exec) runStep(sc *Scenario, step Step) error {
 		return e.send(step.Frame)
 	case StepServerSends:
 		return e.expectServer(step.Frame)
+	case StepServerEmits:
+		return e.serverEmits(step.Frame)
 	case StepExpectRuntimeState:
 		return e.expectRuntime(step.State)
 	case StepExpectServerState:
@@ -278,6 +292,38 @@ func (e *exec) runStep(sc *Scenario, step Step) error {
 	default:
 		return fmt.Errorf("unsupported step kind %q", step.Kind)
 	}
+}
+
+// serverEmits triggers the driver to make the server emit the
+// expected frame, then validates the actual wire frame against the
+// template. Today only frame.type == "delta" is supported (via
+// /test/emit on the control plane) ; other types are reserved for
+// future control plane extensions.
+func (e *exec) serverEmits(expected map[string]any) error {
+	t, _ := expected["type"].(string)
+	if t != "delta" {
+		return fmt.Errorf("server-emits only supports type=delta today, got %q", t)
+	}
+	emitter, ok := e.driver.(EmittingDriver)
+	if !ok {
+		return errors.New("server-emits step requires a driver implementing EmittingDriver")
+	}
+	patches, ok := expected["patches"].([]any)
+	if !ok {
+		return errors.New("server-emits delta missing 'patches' list")
+	}
+	resolved := make([]map[string]any, 0, len(patches))
+	for _, p := range patches {
+		pm, ok := p.(map[string]any)
+		if !ok {
+			return fmt.Errorf("server-emits: patch is not a map: %v", p)
+		}
+		resolved = append(resolved, substitutePlaceholders(pm, e.tokens, e.bundleHashes).(map[string]any))
+	}
+	if err := emitter.Emit(resolved); err != nil {
+		return fmt.Errorf("server-emits: driver emit: %w", err)
+	}
+	return e.expectServer(expected)
 }
 
 // send substitutes $TOKEN_* and $BUNDLE.* placeholders in the frame

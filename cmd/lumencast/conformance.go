@@ -63,16 +63,6 @@ func cmdConformance(args []string) int {
 		opts.Driver = drv
 		// Driver supplies the URL; ServerURL becomes a fallback only.
 		opts.ServerURL = ""
-
-		// Skip the same scenarios the Go in-process self-test skips
-		// — they require driver-side machinery the control plane
-		// does not yet expose (multi-connection token rotation,
-		// driver-driven mid-flight Emit hooks). Tracked as gaps in
-		// `interop/CONTROL.md` follow-up.
-		opts.SkipScenarios = append(opts.SkipScenarios,
-			"token-rotation-no-flicker",
-			"subscribe-snapshot-delta",
-		)
 	}
 
 	rep, err := conformance.CLIRun(context.Background(), opts)
