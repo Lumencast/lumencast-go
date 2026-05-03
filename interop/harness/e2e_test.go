@@ -68,14 +68,10 @@ func TestE2E_GoHarness_Vs_GoServer(t *testing.T) {
 	cfg := conformance.Config{
 		Driver:    drv,
 		TagFilter: conformance.TagRequired,
-		// Same skip list as the in-process self-test : these
-		// scenarios need driver-driven mid-flight Emit hooks and
-		// multi-connection coordination, neither of which the
-		// control plane currently exposes. Tracked as gaps.
-		SkipScenarios: []string{
-			"token-rotation-no-flicker",
-			"subscribe-snapshot-delta",
-		},
+		// token-rotation-no-flicker has target:runtime so it's
+		// auto-skipped by the harness. subscribe-snapshot-delta
+		// uses `server-emits` for its mid-flight deltas — the
+		// HTTPDriver's Emit method routes them through /test/emit.
 	}
 	rep := conformance.Run(nil, cfg)
 	if rep.Failed > 0 {

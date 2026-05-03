@@ -5,6 +5,7 @@ package conformance_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -65,18 +66,31 @@ func (d *inProcessDriver) Setup(scenarioName string) (string, map[string]string,
 	// Recreate the live "t" scene with the canonical scene version
 	// fixture and an empty initial state. Per-scenario tweaks are
 	// keyed off the scenario name.
-	scene := d.srv.NewScene("t",
-		server.WithSceneVersion("sha256:f1d2d2f924e986ac86fdf7b36c94bcdf32beec15c3aef0d27b6bc8f8a90b9e3f"),
-		server.WithDeclaredInputs([]string{"__inputs.title"}),
-	)
-	// Per-scenario initial state. Most scenarios start with an empty
-	// title ; a few rely on a populated initial value.
-	initialTitle := ""
 	switch scenarioName {
-	case "unknown-path-rejected":
-		initialTitle = "Hello"
+	case "subscribe-snapshot-delta":
+		// This scenario doesn't declare a bundle ; it expects the
+		// scene to expose user-facing leaves directly (no
+		// __inputs.* prefix). Seed accordingly.
+		scene := d.srv.NewScene("t",
+			server.WithSceneVersion("sha256:f1d2d2f924e986ac86fdf7b36c94bcdf32beec15c3aef0d27b6bc8f8a90b9e3f"),
+		)
+		_ = scene.Set(map[string]any{
+			"title": "Hello",
+			"count": 0,
+		})
+	default:
+		scene := d.srv.NewScene("t",
+			server.WithSceneVersion("sha256:f1d2d2f924e986ac86fdf7b36c94bcdf32beec15c3aef0d27b6bc8f8a90b9e3f"),
+			server.WithDeclaredInputs([]string{"__inputs.title"}),
+		)
+		// Per-scenario initial state. Most scenarios start with an
+		// empty title ; a few rely on a populated initial value.
+		initialTitle := ""
+		if scenarioName == "unknown-path-rejected" {
+			initialTitle = "Hello"
+		}
+		_ = scene.Set(map[string]any{"__inputs.title": initialTitle})
 	}
-	_ = scene.Set(map[string]any{"__inputs.title": initialTitle})
 
 	// test-session-namespace expects a separate "test-scene".
 	if scenarioName == "test-session-namespace" {
@@ -172,18 +186,34 @@ func (d *inProcessDriver) SnapshotState() map[string]any {
 	return out
 }
 
+// Emit implements EmittingDriver. server-emits scenario steps invoke
+// this to drive the active scene through Scene.Emit, producing a
+// real delta on every subscriber.
+func (d *inProcessDriver) Emit(patches []map[string]any) error {
+	d.mu.Lock()
+	scene := d.srv.ActiveScene()
+	d.mu.Unlock()
+	if scene == nil {
+		return fmt.Errorf("inProcessDriver: no active scene")
+	}
+	flat := make(map[string]any, len(patches))
+	for _, p := range patches {
+		path, _ := p["path"].(string)
+		flat[path] = p["value"]
+	}
+	return scene.Emit(flat)
+}
+
 func TestConformanceSuite_InProcess(t *testing.T) {
 	driver := newInProcessDriver(t)
 	cfg := conformance.Config{
 		Driver:    driver,
 		TagFilter: conformance.TagRequired,
-		// Token-rotation requires multi-connection coordination ; skip.
-		// subscribe-snapshot-delta needs driver-driven Emit hooks
-		// (target: any with mid-flight server-sends).
-		SkipScenarios: []string{
-			"token-rotation-no-flicker",
-			"subscribe-snapshot-delta",
-		},
+		// token-rotation-no-flicker has target:runtime so it's
+		// auto-skipped by the harness ; we don't need to list it
+		// here. subscribe-snapshot-delta now uses `server-emits` to
+		// orchestrate its mid-flight deltas — supported as long as
+		// the driver implements EmittingDriver.
 	}
 	conformance.Run(t, cfg)
 }

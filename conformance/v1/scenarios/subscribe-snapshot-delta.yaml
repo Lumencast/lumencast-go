@@ -30,7 +30,7 @@ steps:
       title: Hello
       count: 0
 
-  - kind: server-sends
+  - kind: server-emits
     frame:
       v: 1
       type: delta
@@ -43,7 +43,7 @@ steps:
       title: Hello
       count: 1
 
-  - kind: server-sends
+  - kind: server-emits
     frame:
       v: 1
       type: delta
