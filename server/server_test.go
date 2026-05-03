@@ -165,6 +165,60 @@ func TestInput_OperatorWritesInputs(t *testing.T) {
 	}
 }
 
+func TestInput_ClientMsgIDEchoedInCause(t *testing.T) {
+	// LSDP/1.1 §4.2 + §3.2.3 — Input.client_msg_id MUST be echoed
+	// verbatim in Cause.input_id of the resulting Delta.
+	srv, url := startTestServer(t, opAuth())
+	scene := srv.NewScene("main", server.WithDeclaredInputs([]string{"__inputs.title"}))
+	_ = scene.Set(map[string]any{"x": 1})
+
+	c := dial(t, url)
+	send(t, c, &protocol.Subscribe{Token: "op-tok"})
+	_ = recv(t, c) // discard snapshot
+
+	send(t, c, &protocol.Input{
+		Patches: []protocol.Patch{
+			{Path: "__inputs.title", Value: json.RawMessage(`"hi"`)},
+		},
+		ClientMsgID: "ui-9f3a",
+	})
+	d, ok := recv(t, c).(*protocol.Delta)
+	if !ok {
+		t.Fatalf("expected delta echo")
+	}
+	if d.Cause == nil {
+		t.Fatalf("expected delta.cause to be set")
+	}
+	if d.Cause.InputID != "ui-9f3a" {
+		t.Fatalf("delta.cause.input_id mismatch: got %q", d.Cause.InputID)
+	}
+	if d.Cause.Source == "" {
+		t.Fatalf("delta.cause.source must be non-empty")
+	}
+}
+
+func TestInput_NoClientMsgID_OmitsCause(t *testing.T) {
+	// Backward compatibility — when the client doesn't supply
+	// client_msg_id, the resulting delta must NOT carry a cause field.
+	srv, url := startTestServer(t, opAuth())
+	scene := srv.NewScene("main", server.WithDeclaredInputs([]string{"__inputs.title"}))
+	_ = scene.Set(map[string]any{"x": 1})
+
+	c := dial(t, url)
+	send(t, c, &protocol.Subscribe{Token: "op-tok"})
+	_ = recv(t, c)
+
+	send(t, c, &protocol.Input{
+		Patches: []protocol.Patch{
+			{Path: "__inputs.title", Value: json.RawMessage(`"hi"`)},
+		},
+	})
+	d := recv(t, c).(*protocol.Delta)
+	if d.Cause != nil {
+		t.Fatalf("expected no cause when client_msg_id is empty, got %+v", d.Cause)
+	}
+}
+
 func TestInput_ViewerForbidden(t *testing.T) {
 	srv, url := startTestServer(t, opAuth())
 	scene := srv.NewScene("main")
