@@ -432,10 +432,23 @@ func (e *exec) expectQuiet(d time.Duration) error {
 	if err == nil {
 		return fmt.Errorf("expected silence for %v, got frame: %s", d, raw)
 	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("read error during quiet window: %w", err)
+	if errors.Is(err, context.DeadlineExceeded) {
+		// Quiet window elapsed without a frame — success.
+		return nil
 	}
-	return nil
+	// Per SCENARIO-FORMAT.md (`expect-no-frame-for` § Connection-close
+	// semantics), a clean server-initiated close within the duration is
+	// success — no data flowed. Abnormal closures remain failures.
+	var ce websocket.CloseError
+	if errors.As(err, &ce) {
+		switch ce.Code {
+		case websocket.StatusNormalClosure,
+			websocket.StatusGoingAway,
+			websocket.StatusNoStatusRcvd:
+			return nil
+		}
+	}
+	return fmt.Errorf("read error during quiet window: %w", err)
 }
 
 func (e *exec) expectClientAction(action ClientAction, _ string) error {
