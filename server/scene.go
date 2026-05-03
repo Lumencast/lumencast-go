@@ -398,16 +398,8 @@ func (s *Scene) checkConstraint(path string, raw json.RawMessage) error {
 	return nil
 }
 
-// subscribe attaches a subscriber to the scene and returns the initial
-// snapshot atomically — no Delta can race in front of the snapshot.
-// live=true marks the subscription as following the server's active
-// scene (it MUST be migrated on SetActive).
-func (s *Scene) subscribe(buffer int, live bool) (*subscription, *protocol.Snapshot) {
-	sub, snap, _ := s.subscribeWithResume(buffer, live, 0)
-	return sub, snap
-}
-
-// subscribeWithResume is the LSDP/1.1 entry point — same as subscribe,
+// subscribeWithResume is the LSDP/1.1 entry point — replaces the old
+// per-subscription `subscribe` helper.
 // but honours the optional `since_sequence` field (§4.1, §18). When the
 // replay buffer covers the gap, the returned `replay` slice contains
 // the deltas to ship in lieu of a snapshot. Otherwise the returned
