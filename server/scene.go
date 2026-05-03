@@ -158,6 +158,19 @@ func (s *Scene) Set(patches map[string]any) error {
 // a Delta frame to every subscriber. Subscribers whose buffer is
 // full collapse to a snapshot to avoid unbounded growth.
 func (s *Scene) Emit(patches map[string]any) error {
+	return s.emitWithCause(patches, nil)
+}
+
+// EmitWithCause is the LSDP/1.1 entry point — same as Emit, but the
+// resulting Delta carries the supplied Cause as provenance metadata
+// (§3.2.3). Adapters and operator-input pipelines use this to thread
+// origin info through to the wire. 1.0 callers stay on Emit and
+// produce cause-less deltas.
+func (s *Scene) EmitWithCause(patches map[string]any, cause *protocol.Cause) error {
+	return s.emitWithCause(patches, cause)
+}
+
+func (s *Scene) emitWithCause(patches map[string]any, cause *protocol.Cause) error {
 	if len(patches) == 0 {
 		return ErrEmptyPatches
 	}
@@ -173,7 +186,7 @@ func (s *Scene) Emit(patches map[string]any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for sub := range s.subscribers {
-		s.sendDelta(sub, wirePatches)
+		s.sendDelta(sub, wirePatches, cause)
 	}
 	return nil
 }
@@ -181,10 +194,11 @@ func (s *Scene) Emit(patches map[string]any) error {
 // sendDelta enqueues a Delta on a subscription, falling back to a
 // fresh Snapshot if the buffer is full (back-pressure protection).
 // Caller MUST hold s.mu.
-func (s *Scene) sendDelta(sub *subscription, patches []protocol.Patch) {
+func (s *Scene) sendDelta(sub *subscription, patches []protocol.Patch, cause *protocol.Cause) {
 	d := &protocol.Delta{
 		Seq:     sub.seq.NextServer(),
 		Patches: patches,
+		Cause:   cause,
 	}
 	select {
 	case sub.out <- d:
@@ -259,7 +273,24 @@ func (s *Scene) applyInput(_ context.Context, id Identity, frame *protocol.Input
 	for _, p := range frame.Patches {
 		patches[p.Path] = p.Value
 	}
-	if err := s.Emit(patches); err != nil {
+
+	// LSDP/1.1 §4.2 + §3.2.3 : when the input carries a client_msg_id,
+	// echo it verbatim into the resulting delta's cause.input_id so
+	// optimistic-UI clients can correlate the echo with their predicted
+	// state. Subject convention is "<role>:<subject>" — falling back to
+	// the role alone when no subject claim is on the token.
+	var cause *protocol.Cause
+	if frame.ClientMsgID != "" {
+		subject := id.Subject
+		if subject == "" {
+			subject = string(id.Role)
+		}
+		cause = &protocol.Cause{
+			Source:  string(id.Role) + ":" + subject,
+			InputID: frame.ClientMsgID,
+		}
+	}
+	if err := s.emitWithCause(patches, cause); err != nil {
 		return protocol.CodeInternal, err
 	}
 	return "", nil
