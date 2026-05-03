@@ -10,14 +10,25 @@ import (
 
 // CLIRunOptions parameterises the CLI-friendly Run wrapper.
 type CLIRunOptions struct {
-	// ServerURL is required.
+	// ServerURL is required when Driver is nil.
 	ServerURL string
+
+	// Driver, when non-nil, takes precedence over ServerURL — every
+	// scenario re-primes server state via Driver.Setup. Used by the
+	// interop matrix (see lumencast-go/interop/harness).
+	Driver Driver
 
 	// Tokens supplied via flags (k=v pairs).
 	Tokens map[string]string
 
 	// TagFilter — defaults to TagRequired.
 	TagFilter Tag
+
+	// SkipScenarios names scenarios to skip (forwarded to Config).
+	// Useful for callers that drive a server which doesn't yet
+	// implement features required by certain scenarios (e.g.
+	// driver-driven Emit hooks for subscribe-snapshot-delta).
+	SkipScenarios []string
 
 	// Output stream for the human-readable report.
 	Out io.Writer
@@ -33,9 +44,11 @@ func CLIRun(ctx context.Context, opts CLIRunOptions) (*Report, error) {
 		opts.Timeout = 60 * time.Second
 	}
 	cfg := Config{
-		ServerURL: opts.ServerURL,
-		Tokens:    opts.Tokens,
-		TagFilter: opts.TagFilter,
+		ServerURL:     opts.ServerURL,
+		Driver:        opts.Driver,
+		Tokens:        opts.Tokens,
+		TagFilter:     opts.TagFilter,
+		SkipScenarios: opts.SkipScenarios,
 	}
 	if cfg.TagFilter == "" {
 		cfg.TagFilter = TagRequired

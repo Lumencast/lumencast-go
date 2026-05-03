@@ -89,12 +89,27 @@ func (p *Plane) handleSetup(w http.ResponseWriter, r *http.Request) {
 	p.installTokens(req.Tokens)
 
 	primary := req.Bundles[0]
-	scene := p.srv.NewScene(primary.ID)
+	opts := []server.SceneOption{}
 	if primary.Hash != "" {
-		scene.SetVersion(primary.Hash)
+		opts = append(opts, server.WithSceneVersion(primary.Hash))
 	}
-	if len(req.InitialState) > 0 {
-		if err := scene.Set(req.InitialState); err != nil {
+	if specs := extractInputSpecs(primary.Inline); len(specs) > 0 {
+		opts = append(opts, server.WithOperatorInputs(specs))
+	}
+	scene := p.srv.NewScene(primary.ID, opts...)
+
+	// initial_state takes precedence ; fall back to inline.defaults
+	// for scenarios that declare a bundle with seeded values rather
+	// than pre-extracted state. Either path leaves the server with
+	// the scene populated before any client subscribes.
+	state := req.InitialState
+	if len(state) == 0 {
+		if d, ok := primary.Inline["defaults"].(map[string]any); ok && len(d) > 0 {
+			state = d
+		}
+	}
+	if len(state) > 0 {
+		if err := scene.Set(state); err != nil {
 			writeProblem(w, http.StatusBadRequest, "bad-initial-state", err.Error())
 			return
 		}
@@ -243,6 +258,37 @@ func (p *Plane) installTokens(tokens map[string]string) {
 		}
 		p.auth.Set(value, id)
 	}
+}
+
+// extractInputSpecs maps an inline LSML bundle's operator_inputs
+// section into server.InputSpec values. Only the constraints the
+// conformance scenarios use today are wired (type, maxLength) ;
+// extend as more scenarios land.
+func extractInputSpecs(inline map[string]any) []server.InputSpec {
+	raw, ok := inline["operator_inputs"].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]server.InputSpec, 0, len(raw))
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		spec := server.InputSpec{}
+		spec.Path, _ = m["path"].(string)
+		spec.Type, _ = m["type"].(string)
+		if c, ok := m["constraints"].(map[string]any); ok {
+			switch v := c["maxLength"].(type) {
+			case int:
+				spec.MaxLength = v
+			case float64:
+				spec.MaxLength = int(v)
+			}
+		}
+		out = append(out, spec)
+	}
+	return out
 }
 
 func placeholderRole(placeholder string) (protocol.Role, bool) {
