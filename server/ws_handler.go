@@ -71,13 +71,32 @@ func (s *Server) serveLSDP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. Subscribe + send Snapshot.
+	// 4. Subscribe + ship initial frames. Honours LSDP/1.1
+	// `since_sequence` resume — when the replay buffer covers the gap,
+	// we ship a delta stream from since_sequence+1 forward instead of
+	// a fresh snapshot (§4.1, §18).
 	live := subFrame.Scene == ""
-	sub, snap := scene.subscribe(256, live)
+	sub, snap, replay := scene.subscribeWithResume(256, live, subFrame.SinceSequence)
 	defer s.detach(sub)
-	if err := sendFrame(ctx, c, snap); err != nil {
-		s.logger.Debug("snapshot send failed", "err", err)
-		return
+	if snap != nil {
+		if err := sendFrame(ctx, c, snap); err != nil {
+			s.logger.Debug("snapshot send failed", "err", err)
+			return
+		}
+	} else {
+		// Replay path — ship the buffered deltas before entering the
+		// main loop. Each carries its original (per-scene) seq.
+		for _, r := range replay {
+			d := &protocol.Delta{
+				Seq:     r.seq,
+				Patches: r.patches,
+				Cause:   r.cause,
+			}
+			if err := sendFrame(ctx, c, d); err != nil {
+				s.logger.Debug("replay delta send failed", "err", err)
+				return
+			}
+		}
 	}
 
 	// 5. Loop. Reader and writer share the connection ; coder/websocket
@@ -148,7 +167,10 @@ func (s *Server) runConnection(
 			if errors.Is(derr, protocol.ErrVersionMismatch) {
 				code = protocol.CodeVersionMismatch
 			}
-			_ = sendError(ctx, c, sub.seq.NextServer(), code, derr.Error(), false)
+			// Error frames carry the current scene seq — they don't
+			// advance it (per-scene seq, §18.1.1, errors are
+			// connection-scoped not scene-scoped events).
+			_ = sendError(ctx, c, scene.seq.Current(), code, derr.Error(), false)
 			cancel()
 			<-writerErr
 			return derr
@@ -157,7 +179,7 @@ func (s *Server) runConnection(
 		case *protocol.Input:
 			code, ierr := scene.applyInput(ctx, id, m)
 			if ierr != nil {
-				_ = sendError(ctx, c, sub.seq.NextServer(), code, ierr.Error(), code != protocol.CodeAuthDenied)
+				_ = sendError(ctx, c, scene.seq.Current(), code, ierr.Error(), code != protocol.CodeAuthDenied)
 			}
 		case *protocol.Ping:
 			// LSDP/1.1 §3.5 : echo the nonce verbatim if present.
@@ -177,7 +199,7 @@ func (s *Server) runConnection(
 			<-writerErr
 			return nil
 		case *protocol.Subscribe:
-			_ = sendError(ctx, c, sub.seq.NextServer(), protocol.CodeInternal, "duplicate subscribe", false)
+			_ = sendError(ctx, c, scene.seq.Current(), protocol.CodeInternal, "duplicate subscribe", false)
 			cancel()
 			<-writerErr
 			return errors.New("duplicate subscribe")

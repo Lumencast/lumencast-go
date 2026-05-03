@@ -197,6 +197,65 @@ func TestInput_ClientMsgIDEchoedInCause(t *testing.T) {
 	}
 }
 
+func TestSubscribeWithSinceSequence_Resumes(t *testing.T) {
+	// LSDP/1.1 §4.1, §18 — subscribe with since_sequence covered by
+	// the replay buffer ships a delta stream from since_sequence+1
+	// forward instead of a fresh snapshot.
+	srv, url := startTestServer(t, opAuth())
+	scene := srv.NewScene("main", server.WithDeclaredInputs([]string{"__inputs.title"}))
+	_ = scene.Set(map[string]any{"__inputs.title": ""})
+
+	// First subscriber : observes snapshot(seq=1) and delta(seq=2).
+	c := dial(t, url)
+	send(t, c, &protocol.Subscribe{Token: "op-tok"})
+	snap, ok := recv(t, c).(*protocol.Snapshot)
+	if !ok {
+		t.Fatalf("expected snapshot")
+	}
+	if snap.Seq != 1 {
+		t.Fatalf("first snapshot seq: got %d want 1", snap.Seq)
+	}
+	send(t, c, &protocol.Input{
+		Patches: []protocol.Patch{{Path: "__inputs.title", Value: json.RawMessage(`"hi"`)}},
+	})
+	d, ok := recv(t, c).(*protocol.Delta)
+	if !ok || d.Seq != 2 {
+		t.Fatalf("expected delta seq=2, got %+v", d)
+	}
+	_ = c.CloseNow()
+
+	// Second connection with since_sequence=1 should receive delta(seq=2)
+	// (the one buffered) instead of a fresh snapshot.
+	c2 := dial(t, url)
+	send(t, c2, &protocol.Subscribe{Token: "op-tok", SinceSequence: 1})
+	frame := recv(t, c2)
+	d2, ok := frame.(*protocol.Delta)
+	if !ok {
+		t.Fatalf("expected delta on resume, got %T", frame)
+	}
+	if d2.Seq != 2 {
+		t.Fatalf("resume delta seq: got %d want 2", d2.Seq)
+	}
+}
+
+func TestSubscribeWithSinceSequence_FallsBackToSnapshot(t *testing.T) {
+	// When the replay buffer doesn't cover the requested resume point,
+	// the server MUST fall back to a fresh snapshot (§18.1).
+	srv, url := startTestServer(t, opAuth())
+	scene := srv.NewScene("main", server.WithDeclaredInputs([]string{"__inputs.title"}))
+	_ = scene.Set(map[string]any{"__inputs.title": ""})
+
+	c := dial(t, url)
+	send(t, c, &protocol.Subscribe{Token: "op-tok", SinceSequence: 999999})
+	snap, ok := recv(t, c).(*protocol.Snapshot)
+	if !ok {
+		t.Fatalf("expected snapshot fallback, got %T", snap)
+	}
+	if snap.Seq < 1 {
+		t.Fatalf("snapshot seq must be >= 1, got %d", snap.Seq)
+	}
+}
+
 func TestInput_NoClientMsgID_OmitsCause(t *testing.T) {
 	// Backward compatibility — when the client doesn't supply
 	// client_msg_id, the resulting delta must NOT carry a cause field.

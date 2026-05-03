@@ -225,21 +225,38 @@ func TestSequenceTracker_ObserveServer(t *testing.T) {
 	}
 }
 
-func TestSequenceTracker_RejectsInvalidStart(t *testing.T) {
+func TestSequenceTracker_AcceptsAnyPositiveStart(t *testing.T) {
+	// LSDP/1.1 §18.1.1 — fresh tracker accepts any positive seq as
+	// the baseline (per-scene seq, late-joining subscribers may see
+	// snapshot at seq > 1). Only seq=0 is rejected.
 	s := NewSequenceTracker()
-	if _, err := s.ObserveServer(2); !errors.Is(err, ErrInvalidSeqStart) {
-		t.Fatalf("first non-1: want ErrInvalidSeqStart, got %v", err)
+	if skip, err := s.ObserveServer(42); err != nil || skip {
+		t.Fatalf("first frame at 42: want OK, got skip=%v err=%v", skip, err)
+	}
+	if skip, err := s.ObserveServer(43); err != nil || skip {
+		t.Fatalf("subsequent +1: want OK, got skip=%v err=%v", skip, err)
+	}
+	// seq=0 is still invalid.
+	s2 := NewSequenceTracker()
+	if _, err := s2.ObserveServer(0); !errors.Is(err, ErrInvalidSeqStart) {
+		t.Fatalf("seq=0: want ErrInvalidSeqStart, got %v", err)
 	}
 }
 
 func TestSequenceTracker_SceneChangedReset(t *testing.T) {
+	// After SceneChanged, the runtime calls ObserveSnapshot to rebase
+	// to the new scene's snapshot seq (typically 1, but per §18.1.1
+	// it can be any positive value).
 	s := NewSequenceTracker()
 	_, _ = s.ObserveServer(1)
 	_, _ = s.ObserveServer(2)
 	_, _ = s.ObserveServer(3)
-	// Scene changed → next snapshot resets to 1.
-	if skip, err := s.ObserveServer(1); err != nil || skip {
-		t.Fatalf("seq=1 after change: skip=%v err=%v", skip, err)
+	if err := s.ObserveSnapshot(1); err != nil {
+		t.Fatalf("rebase to 1: %v", err)
+	}
+	// Subsequent deltas continue from there.
+	if skip, err := s.ObserveServer(2); err != nil || skip {
+		t.Fatalf("seq=2 after rebase: skip=%v err=%v", skip, err)
 	}
 }
 

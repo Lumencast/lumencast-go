@@ -161,9 +161,11 @@ func (s *Server) detach(sub *subscription) {
 	}
 }
 
-// migrateLive moves every live subscription from prev to next, emits
-// SceneChanged on each (with seq = previous+1), then a Snapshot with
-// seq = 1.
+// migrateLive moves every live subscription from prev to next. It
+// emits SceneChanged on prev (with prev's seq advancing one final
+// step), then a fresh Snapshot at next's current seq (typically 1
+// for a freshly-created scene). Per LSDP/1.1 §18.1.1, the scene's
+// seq counter is independent across scenes.
 func migrateLive(prev, next *Scene) {
 	prev.mu.Lock()
 	live := make([]*subscription, 0, len(prev.subscribers))
@@ -175,6 +177,9 @@ func migrateLive(prev, next *Scene) {
 	for _, sub := range live {
 		delete(prev.subscribers, sub)
 	}
+	// Advance prev's seq one last time for the SceneChanged frame —
+	// SceneChanged is the prev scene's final wire emission.
+	prevSeq := prev.seq.NextServer()
 	prev.mu.Unlock()
 
 	if len(live) == 0 {
@@ -183,11 +188,10 @@ func migrateLive(prev, next *Scene) {
 
 	next.mu.Lock()
 	state := next.store.snapshot()
+	nextSeq := next.seq.Current()
 	for _, sub := range live {
-		// Emit scene_changed on the OLD seq, then reset and emit a
-		// fresh snapshot at seq=1 on the NEW scene.
 		sc := &protocol.SceneChanged{
-			Seq:          sub.seq.NextServer(),
+			Seq:          prevSeq,
 			SceneID:      next.id,
 			SceneVersion: next.version,
 		}
@@ -197,9 +201,8 @@ func migrateLive(prev, next *Scene) {
 			sub.markStale()
 			continue
 		}
-		sub.seq.Reset()
 		snap := &protocol.Snapshot{
-			Seq:          sub.seq.NextServer(),
+			Seq:          nextSeq,
 			SceneID:      next.id,
 			SceneVersion: next.version,
 			State:        state,
