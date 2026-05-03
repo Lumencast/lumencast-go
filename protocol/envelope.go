@@ -32,10 +32,25 @@ import (
 // the source of truth for both encode and decode.
 const Version = 1
 
-// SubProtocol is the WebSocket subprotocol tag negotiated on the
-// upgrade. Servers MUST reject upgrade requests that do not advertise
-// this with HTTP 426.
+// SubProtocol is the LSDP/1.0 WebSocket subprotocol tag, kept for
+// backwards-compatible negotiation. Clients that speak only 1.0
+// advertise this. Servers MUST reject upgrade requests that do not
+// advertise either SubProtocol or SubProtocolV1_1 with HTTP 426.
 const SubProtocol = "lsdp.v1"
+
+// SubProtocolV1_1 is the LSDP/1.1 WebSocket subprotocol tag. Clients
+// advertising this opt into the additive 1.1 frame surface
+// (since_sequence resume, unsubscribe frame, per-leaf transition
+// directive, cause, nonce on ping/pong, client_msg_id on input,
+// from_scene_id + show transition on scene_changed). Servers MUST
+// continue to accept SubProtocol for 1.0 clients.
+const SubProtocolV1_1 = "lsdp.v1.1"
+
+// SubProtocols is the canonical advertise/accept list, ordered by
+// preference (1.1 preferred over 1.0). Pass this to the websocket
+// upgrader's Subprotocols field — the library performs RFC-6455
+// preference negotiation.
+var SubProtocols = []string{SubProtocolV1_1, SubProtocol}
 
 // Frame type discriminators. Constants instead of strings everywhere
 // so a typo in a handler is a compile error, not a silent runtime
@@ -49,6 +64,7 @@ const (
 	TypeSubscribe    = "subscribe"
 	TypeInput        = "input"
 	TypePing         = "ping"
+	TypeUnsubscribe  = "unsubscribe" // LSDP/1.1 §4.4
 )
 
 // envelope is the minimal shape used to peek at `type` and `v` on

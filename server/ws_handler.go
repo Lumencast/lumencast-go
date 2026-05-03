@@ -12,23 +12,26 @@ import (
 )
 
 // serveLSDP is the WebSocket subscribe handler. It implements the
-// LSDP/1 lifecycle :
+// LSDP/1.x lifecycle :
 //
-//  1. Negotiate Sec-WebSocket-Protocol = lsdp.v1, else HTTP 426.
+//  1. Negotiate Sec-WebSocket-Protocol — `lsdp.v1.1` preferred,
+//     `lsdp.v1` accepted for backward compat. Anything else → close
+//     with policy violation.
 //  2. Accept the upgrade.
 //  3. Read the first Subscribe frame within SubscribeTimeout.
 //  4. Authenticate the token ; pick a scene ; emit Snapshot.
 //  5. Run the read/write loops until ctx end or peer close.
 func (s *Server) serveLSDP(w http.ResponseWriter, r *http.Request) {
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		Subprotocols: []string{protocol.SubProtocol},
+		Subprotocols: protocol.SubProtocols,
 	})
 	if err != nil {
 		s.logger.Warn("ws accept failed", "err", err)
 		return
 	}
-	if c.Subprotocol() != protocol.SubProtocol {
-		_ = c.Close(websocket.StatusPolicyViolation, "lsdp.v1 subprotocol required")
+	negotiated := c.Subprotocol()
+	if negotiated != protocol.SubProtocolV1_1 && negotiated != protocol.SubProtocol {
+		_ = c.Close(websocket.StatusPolicyViolation, "lsdp.v1 or lsdp.v1.1 subprotocol required")
 		return
 	}
 	c.SetReadLimit(s.cfg.MaxFrameBytes)
@@ -157,7 +160,8 @@ func (s *Server) runConnection(
 				_ = sendError(ctx, c, sub.seq.NextServer(), code, ierr.Error(), code != protocol.CodeAuthDenied)
 			}
 		case *protocol.Ping:
-			if err := sendFrame(ctx, c, &protocol.Pong{}); err != nil {
+			// LSDP/1.1 §3.5 : echo the nonce verbatim if present.
+			if err := sendFrame(ctx, c, &protocol.Pong{Nonce: m.Nonce}); err != nil {
 				cancel()
 				<-writerErr
 				return err
@@ -165,6 +169,13 @@ func (s *Server) runConnection(
 		case *protocol.Pong:
 			// Liveness reply ; nothing to do — the read deadline
 			// resets on every received frame.
+		case *protocol.Unsubscribe:
+			// LSDP/1.1 §4.4 : clean teardown. No data flows after this
+			// frame ; the server closes the WebSocket within 1 second.
+			// Cancel writer, wait for it, return cleanly.
+			cancel()
+			<-writerErr
+			return nil
 		case *protocol.Subscribe:
 			_ = sendError(ctx, c, sub.seq.NextServer(), protocol.CodeInternal, "duplicate subscribe", false)
 			cancel()
