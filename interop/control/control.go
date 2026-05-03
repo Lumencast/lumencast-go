@@ -265,8 +265,7 @@ func errorCode(err error) string {
 	if err == nil {
 		return ""
 	}
-	switch {
-	case errors.Is(err, server.ErrEmptyPatches):
+	if errors.Is(err, server.ErrEmptyPatches) {
 		return "EMPTY_PATCHES"
 	}
 	return "INVALID"
