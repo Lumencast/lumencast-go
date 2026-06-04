@@ -19,20 +19,17 @@ import (
 // the canonical bytes + hash match the TS golden.
 //
 //   - case_a_float   : exponential / shortest-decimal floats        -> MATCH (verified)
-//   - case_b_html    : strings containing & < >                      -> DIVERGES (see below)
+//   - case_b_html    : strings containing & < >                      -> MATCH (since fix)
 //   - case_c_opt     : optional field absent                        -> MATCH (verified)
 //
-// KNOWN DIVERGENCE (case_b_html), reported 2026-06-05:
+// RESOLVED DIVERGENCE (case_b_html), reported 2026-06-05, fixed in
+// hash.go via marshalString (json.Encoder.SetEscapeHTML(false)):
 //   Go's encoding/json escapes &,<,> as &,<,> by default
-//   (SetEscapeHTML(true)); TS JSON.stringify does NOT. canonicalize.ts §3
-//   and hash.go §3 claim identical discipline but their serializers diverge
-//   here. Until hash.go disables HTML escaping (json.Encoder.SetEscapeHTML(false)
-//   in writeCanonical for strings), C4 MUST NOT ship — adopt-on-verify would
-//   silently fall back to legacy for any bundle with these characters.
-//
-// case_b_html is intentionally LEFT FAILING (not skipped, not adjusted) so
-// the gate stays red until the SDK fix lands. Do not "fix" it by mutating
-// the bundle or the expected golden.
+//   (SetEscapeHTML(true)); TS JSON.stringify does NOT. hash.go now disables
+//   HTML escaping for both string values and object keys so the canonical
+//   form is byte-identical to canonicalize.ts §3. case_b_html is now a
+//   permanent regression golden locking the TS hash — any future SDK change
+//   that reintroduces escaping turns this test red.
 
 type xlangGolden struct {
 	name      string
@@ -51,11 +48,10 @@ func xlangGoldenCases() []xlangGolden {
 			tsCanon: `{"defaults":{"big":1234567890123456800,"exp":1.5e-10,"tiny":1e-7,"whole":2},"layout":{"kind":"stack"},"lsml":"1.1","scene_id":"s","scene_version":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}`,
 		},
 		{
-			name:      "case_b_html",
-			bundle:    `{"lsml":"1.1","scene_id":"s","scene_version":"sha256:0000000000000000000000000000000000000000000000000000000000000000","layout":{"kind":"stack"},"metadata":{"title":"A & B <live>"}}`,
-			tsHash:    "7050dd0c6c1a92a174db87b457eb66205519cd87ac583694f97c8c3fb7da097c",
-			tsCanon:   `{"layout":{"kind":"stack"},"lsml":"1.1","metadata":{"title":"A & B <live>"},"scene_id":"s","scene_version":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}`,
-			expectGap: true, // Go escapes &,<,> ; TS does not. See file header.
+			name:    "case_b_html",
+			bundle:  `{"lsml":"1.1","scene_id":"s","scene_version":"sha256:0000000000000000000000000000000000000000000000000000000000000000","layout":{"kind":"stack"},"metadata":{"title":"A & B <live>"}}`,
+			tsHash:  "7050dd0c6c1a92a174db87b457eb66205519cd87ac583694f97c8c3fb7da097c",
+			tsCanon: `{"layout":{"kind":"stack"},"lsml":"1.1","metadata":{"title":"A & B <live>"},"scene_id":"s","scene_version":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}`,
 		},
 		{
 			name:    "case_c_optional_absent",

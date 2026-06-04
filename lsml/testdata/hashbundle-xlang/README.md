@@ -11,33 +11,23 @@ were captured so they can be regenerated when the SDK fix lands.
 
 ## Bundles under test
 
-| Case | Risk | Verdict (2026-06-05) |
+| Case | Risk | Verdict |
 |---|---|---|
 | `case_a_float` | exponential / shortest-decimal floats, >2^53 int | MATCH |
-| `case_b_html` | strings with `&` `<` `>` | **DIVERGE** |
+| `case_b_html` | strings with `&` `<` `>` | MATCH (since fix, 2026-06-05) |
 | `case_c_optional_absent` | optional field absent vs `omitempty` | MATCH |
 
-## Known divergence (case_b_html)
+## Resolved divergence (case_b_html)
 
-Go `encoding/json` escapes `&`→`&`, `<`→`<`, `>`→`>` by
+Go `encoding/json` escaped `&`→`&`, `<`→`<`, `>`→`>` by
 default (`SetEscapeHTML(true)`); TS `JSON.stringify` does not. Same §3
 discipline on paper, divergent serializers in practice.
 
-Fix required before C4 ships: disable HTML escaping in
-`lsml/hash.go writeCanonical` for the `string` case, e.g.
-
-```go
-case string:
-    var b bytes.Buffer
-    enc := json.NewEncoder(&b)
-    enc.SetEscapeHTML(false)
-    if err := enc.Encode(x); err != nil { return err }
-    buf.Write(bytes.TrimRight(b.Bytes(), "\n"))
-```
-
-When the fix lands, `case_b_html` will start matching; flip
-`expectGap` to `false` in the golden test and lock the TS hash as the
-permanent regression golden.
+Fixed in `lsml/hash.go` by routing every string emission (both object
+values and object keys) through `marshalString`, which uses a
+`json.Encoder` with `SetEscapeHTML(false)`. The canonical form is now
+byte-identical to `canonicalize.ts`. `case_b_html` is a permanent
+regression golden locking the TS hash.
 
 ## Regenerate the TS golden
 
