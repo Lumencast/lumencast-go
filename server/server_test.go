@@ -528,3 +528,46 @@ func TestEmitFanOut(t *testing.T) {
 		t.Fatalf("patch missing value 5")
 	}
 }
+
+// TestEmitPatchesSortedByPath guards the determinism fix : a multi-patch
+// Emit must produce Delta.Patches in stable lexicographic leaf-path
+// order, regardless of the input map's (randomised) iteration order.
+// Without the sort in store.applyPatches the order varied run to run,
+// which made the subscribe-snapshot-delta conformance scenario flaky.
+func TestEmitPatchesSortedByPath(t *testing.T) {
+	srv, url := startTestServer(t, opAuth())
+	scene := srv.NewScene("main")
+	_ = scene.Set(map[string]any{"alpha": 0, "mid": 0, "zeta": 0})
+
+	c := dial(t, url)
+	send(t, c, &protocol.Subscribe{Token: "viewer-tok"})
+	_ = recv(t, c) // snapshot
+
+	// Emit several leaves in one frame. Map iteration order is
+	// randomised by Go, so a single run is enough to catch a regression
+	// on average, but assert the full order to be explicit.
+	if err := scene.Emit(map[string]any{
+		"zeta":  1,
+		"alpha": 1,
+		"mid":   1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	d, ok := recv(t, c).(*protocol.Delta)
+	if !ok {
+		t.Fatalf("expected *Delta")
+	}
+	got := make([]string, len(d.Patches))
+	for i, p := range d.Patches {
+		got[i] = p.Path
+	}
+	want := []string{"alpha", "mid", "zeta"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d patches, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("patch order = %v, want %v (must be lexicographic by path)", got, want)
+		}
+	}
+}

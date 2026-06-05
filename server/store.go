@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 )
 
@@ -38,6 +39,13 @@ func (s *store) snapshot() map[string]json.RawMessage {
 // applyPatches mutates the store and returns the canonicalised
 // patches (encoded once) ready to ship in a Delta frame. Returns
 // ErrEmptyPatches if patches is empty.
+//
+// The returned slice is sorted lexicographically by leaf path. The
+// input is a map, whose iteration order Go randomises ; without a
+// stable sort the resulting Delta.Patches order would vary run to
+// run. LSDP/1 does not constrain patch order semantically, but a
+// reproducible stream matters for golden frames and conformance
+// (the subscribe-snapshot-delta scenario asserts an exact order).
 func (s *store) applyPatches(patches map[string]any) ([]rawPatch, error) {
 	if len(patches) == 0 {
 		return nil, ErrEmptyPatches
@@ -53,6 +61,7 @@ func (s *store) applyPatches(patches map[string]any) ([]rawPatch, error) {
 		s.state[path] = raw
 		out = append(out, rawPatch{Path: path, Value: raw})
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
 }
 
