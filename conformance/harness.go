@@ -82,6 +82,18 @@ type EmittingDriver interface {
 	Emit(patches []map[string]any) error
 }
 
+// DialHeaderDriver is an optional extension. When a driver implements
+// it, the harness attaches the returned headers to the WebSocket
+// upgrade request for the scenario. This exists for servers configured
+// with a header-trust identity seam (ADR 007 §C.3a), where the caller's
+// principal arrives as an upgrade header injected by a trusted proxy
+// rather than in the Subscribe token. Returning a nil/empty header is a
+// no-op, so the default token-based harness path is unaffected.
+type DialHeaderDriver interface {
+	Driver
+	DialHeader(scenarioName string) http.Header
+}
+
 // ResolvedBundle is the Driver-friendly view of a scenario bundle :
 // the inline LSML body plus the computed sha256:<hex> hash.
 type ResolvedBundle struct {
@@ -218,9 +230,15 @@ func runScenario(sc *Scenario, cfg Config) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	var dialHeader http.Header
+	if dh, ok := cfg.Driver.(DialHeaderDriver); ok {
+		dialHeader = dh.DialHeader(sc.Name)
+	}
+
 	c, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{
 		Subprotocols: []string{protocol.SubProtocol},
 		HTTPClient:   &http.Client{Timeout: 5 * time.Second},
+		HTTPHeader:   dialHeader,
 	})
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
