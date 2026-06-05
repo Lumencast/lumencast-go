@@ -19,8 +19,10 @@ import (
 )
 
 // Identity is the principal returned by an Authenticator after a
-// successful token validation. The server uses it to enforce role and
-// path scoping on incoming Input frames.
+// successful token validation, or by a RequestIdentityFunc derived
+// from trusted request headers (ADR 007 §C.3a, no token involved).
+// The server uses it to enforce role and path scoping on incoming
+// Input frames.
 type Identity struct {
 	// Subject is the human-readable principal identifier — a user
 	// name, a service name. Used in audit logs ; not load-bearing
