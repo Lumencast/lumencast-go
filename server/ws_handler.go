@@ -55,8 +55,19 @@ func (s *Server) serveLSDP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Authenticate.
-	id, err := s.cfg.Auth.Authenticate(ctx, subFrame.Token)
+	// 2. Authenticate. Two sources of identity, selected at config time :
+	//   - header-trust seam (ADR 007 §C.3a) : a trusted front-proxy has
+	//     already authenticated the caller, so we derive the Identity from
+	//     the upgrade request and ignore the Subscribe token entirely ;
+	//   - token path (default) : validate Subscribe.Token via Auth.
+	// The downstream lifecycle (resolveScene, subscribeWithResume, write
+	// loop, CanWrite) is identical regardless of source.
+	var id Identity
+	if s.cfg.IdentityFromRequest != nil {
+		id, err = s.cfg.IdentityFromRequest(r)
+	} else {
+		id, err = s.cfg.Auth.Authenticate(ctx, subFrame.Token)
+	}
 	if err != nil || !id.IsAuthenticated() {
 		_ = sendError(ctx, c, 0, protocol.CodeAuthDenied, "token invalid", false)
 		_ = c.Close(websocket.StatusPolicyViolation, "auth denied")
