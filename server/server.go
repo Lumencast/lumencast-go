@@ -20,9 +20,22 @@ type Config struct {
 	ListenAddr string
 
 	// Auth is the credential validator called on every WebSocket
-	// subscribe frame. REQUIRED. The kit ships StaticTokens for
-	// development.
+	// subscribe frame. The kit ships StaticTokens for development.
+	//
+	// REQUIRED unless IdentityFromRequest is set : New rejects a Config
+	// where both Auth and IdentityFromRequest are nil.
 	Auth Authenticator
+
+	// IdentityFromRequest is the optional header-trust seam (ADR 007
+	// §C.3a). When non-nil, the server derives the connection's Identity
+	// from the upgrade *http.Request — typically a header injected by a
+	// trusted front-proxy — and IGNORES the Subscribe frame's token.
+	// When nil, the server falls back to the Auth token path.
+	//
+	// Additive and non-breaking : leaving this nil preserves the exact
+	// token-authentication behaviour. If both Auth and IdentityFromRequest
+	// are set, IdentityFromRequest takes precedence.
+	IdentityFromRequest RequestIdentityFunc
 
 	// Logger receives structured server events. Defaults to
 	// slog.Default() if nil.
@@ -65,8 +78,8 @@ func New(cfg Config) (*Server, error) {
 	if cfg.ListenAddr == "" {
 		return nil, errors.New("server: Config.ListenAddr is required")
 	}
-	if cfg.Auth == nil {
-		return nil, errors.New("server: Config.Auth is required")
+	if cfg.Auth == nil && cfg.IdentityFromRequest == nil {
+		return nil, errors.New("server: Config.Auth or Config.IdentityFromRequest is required")
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()

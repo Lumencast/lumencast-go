@@ -12,6 +12,7 @@ package server
 import (
 	"context"
 	"errors"
+	"net/http"
 	"sync"
 
 	"github.com/Lumencast/lumencast-go/protocol"
@@ -113,6 +114,21 @@ type Authenticator interface {
 	// failure.
 	Authenticate(ctx context.Context, token string) (Identity, error)
 }
+
+// RequestIdentityFunc derives an Identity from the HTTP request that
+// carried the WebSocket upgrade, instead of from the Subscribe frame's
+// token. It is the header-trust seam (ADR 007 §C.3a) : a trusted
+// front-proxy or gateway authenticates the caller and injects the
+// principal as request headers, and the server reads it from there.
+//
+// When configured on Config.IdentityFromRequest, the server calls this
+// on every upgrade and IGNORES Subscribe.Token. Returning a non-nil
+// error, or an Identity with an invalid role, is treated as
+// authentication failure (the server replies AUTH_DENIED and closes).
+//
+// It is mutually additive with Auth : if both are set, the request
+// function wins. The token path (Auth only) is unchanged.
+type RequestIdentityFunc func(r *http.Request) (Identity, error)
 
 // AuthenticatorFunc adapts an ordinary function to the Authenticator
 // interface for one-off use. Useful in tests and the lumencast init
