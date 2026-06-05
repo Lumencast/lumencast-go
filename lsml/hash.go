@@ -77,7 +77,7 @@ func writeCanonical(buf *bytes.Buffer, v any) error {
 			buf.WriteString("false")
 		}
 	case string:
-		raw, err := json.Marshal(x)
+		raw, err := marshalString(x)
 		if err != nil {
 			return err
 		}
@@ -115,7 +115,7 @@ func writeCanonical(buf *bytes.Buffer, v any) error {
 			if i > 0 {
 				buf.WriteByte(',')
 			}
-			raw, err := json.Marshal(k)
+			raw, err := marshalString(k)
 			if err != nil {
 				return err
 			}
@@ -130,4 +130,26 @@ func writeCanonical(buf *bytes.Buffer, v any) error {
 		return fmt.Errorf("canonical: unsupported type %T", v)
 	}
 	return nil
+}
+
+// marshalString JSON-encodes a string WITHOUT escaping &, <, > as
+// &, <, >. Go's encoding/json escapes these by default
+// (SetEscapeHTML(true)) as an anti-XSS measure for HTML embedding, but
+// the TS reference serializer (@lumencast/compiler canonicalize.ts,
+// JSON.stringify) does not. Disabling it keeps the canonical form
+// byte-identical across SDKs, which the LSML content hash (spec § 3)
+// requires — otherwise a string containing any of these characters
+// produces a different scene_version in Go vs TS and the
+// adopt-on-verify path (ADR 007 § C4) silently falls back to legacy.
+//
+// json.Encoder appends a trailing newline that json.Marshal does not,
+// so it is trimmed.
+func marshalString(s string) ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(s); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(b.Bytes(), "\n"), nil
 }
