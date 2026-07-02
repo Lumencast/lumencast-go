@@ -104,6 +104,35 @@ type SceneChanged struct {
 	Transition *SceneTransition `json:"transition,omitempty"`
 }
 
+// RosterEntry is one scene in a show's preload roster : the scene id
+// and the content hash (scene_version) the runtime should preload the
+// bundle at.
+type RosterEntry struct {
+	SceneID      string `json:"scene_id"`
+	SceneVersion string `json:"scene_version"`
+}
+
+// SceneRoster is an additive, show-level frame advertising the full set
+// of scenes (and their versions) available on the live show, so a
+// runtime can preload every bundle ahead of a scene swap (Prism#230,
+// Lumencast/lumencast-js#88).
+//
+// It carries no `seq` : it is out-of-band show metadata, not a
+// per-subscription state frame — parity with pong heartbeats (spec §5).
+// Servers SHOULD emit it only to subscribers that negotiated
+// lsdp.v1.1 ; 1.0 receivers silently ignore unknown frame types
+// (spec §13). The server emits one on subscribe (right after the
+// initial snapshot) and again whenever the roster changes.
+//
+// Entries is required and MUST encode as a JSON array (never null) ;
+// an empty roster is `[]`.
+type SceneRoster struct {
+	V       int           `json:"v"`
+	Type    string        `json:"type"`
+	Entries []RosterEntry `json:"entries"`
+	TS      string        `json:"ts,omitempty"`
+}
+
 // Error is the server-emitted error frame. Recoverable=false signals
 // "stop trying" ; the server MUST close the WebSocket within 1 second
 // of sending. Recoverable=true keeps the connection open.

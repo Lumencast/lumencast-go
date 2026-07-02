@@ -33,6 +33,19 @@ func Encode(msg any) ([]byte, error) {
 		c := *m
 		c.V, c.Type = Version, TypeSceneChanged
 		return marshal(c)
+	case SceneRoster:
+		m.V, m.Type = Version, TypeSceneRoster
+		if m.Entries == nil {
+			m.Entries = []RosterEntry{}
+		}
+		return marshal(m)
+	case *SceneRoster:
+		c := *m
+		c.V, c.Type = Version, TypeSceneRoster
+		if c.Entries == nil {
+			c.Entries = []RosterEntry{}
+		}
+		return marshal(c)
 	case Error:
 		m.V, m.Type = Version, TypeError
 		return marshal(m)
@@ -139,7 +152,8 @@ func Decode(raw []byte) (any, error) {
 
 // DecodeServer parses a server-emitted frame, used by clients (and
 // the conformance harness). Returns one of (*Snapshot, *Delta,
-// *SceneChanged, *Error, *Pong, *Ping). Per spec § 13, runtimes that
+// *SceneChanged, *SceneRoster, *Error, *Pong, *Ping). Per spec § 13,
+// runtimes that
 // receive an unknown frame type MUST silently ignore it ; the harness
 // surfaces the unknown via ErrUnknownType so test code can choose.
 func DecodeServer(raw []byte) (any, error) {
@@ -165,6 +179,12 @@ func DecodeServer(raw []byte) (any, error) {
 		return &m, nil
 	case TypeSceneChanged:
 		var m SceneChanged
+		if err := unmarshal(raw, &m); err != nil {
+			return nil, err
+		}
+		return &m, nil
+	case TypeSceneRoster:
+		var m SceneRoster
 		if err := unmarshal(raw, &m); err != nil {
 			return nil, err
 		}
