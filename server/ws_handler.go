@@ -87,7 +87,8 @@ func (s *Server) serveLSDP(w http.ResponseWriter, r *http.Request) {
 	// we ship a delta stream from since_sequence+1 forward instead of
 	// a fresh snapshot (§4.1, §18).
 	live := subFrame.Scene == ""
-	sub, snap, replay := scene.subscribeWithResume(256, live, subFrame.SinceSequence)
+	proto11 := negotiated == protocol.SubProtocolV1_1
+	sub, snap, replay := scene.subscribeWithResume(256, live, proto11, subFrame.SinceSequence)
 	defer s.detach(sub)
 	if snap != nil {
 		if err := sendFrame(ctx, c, snap); err != nil {
@@ -105,6 +106,20 @@ func (s *Server) serveLSDP(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := sendFrame(ctx, c, d); err != nil {
 				s.logger.Debug("replay delta send failed", "err", err)
+				return
+			}
+		}
+	}
+
+	// 4b. Replay the cached show roster to this subscriber right after
+	// its initial snapshot, so a fresh 1.1 runtime can preload every
+	// scene bundle without waiting for the next roster change (Prism#230).
+	// Show-level metadata : live subscribers only, and only when the
+	// connection negotiated 1.1.
+	if live && proto11 {
+		if roster, ok := s.rosterFrame(); ok {
+			if err := sendFrame(ctx, c, roster); err != nil {
+				s.logger.Debug("roster replay send failed", "err", err)
 				return
 			}
 		}

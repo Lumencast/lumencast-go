@@ -407,13 +407,14 @@ func (s *Scene) checkConstraint(path string, raw json.RawMessage) error {
 //
 // The caller MUST send EITHER the snapshot OR the replay deltas — never
 // both. snap is non-nil iff replay is nil.
-func (s *Scene) subscribeWithResume(buffer int, live bool, sinceSequence uint64) (*subscription, *protocol.Snapshot, []replayRecord) {
+func (s *Scene) subscribeWithResume(buffer int, live, proto11 bool, sinceSequence uint64) (*subscription, *protocol.Snapshot, []replayRecord) {
 	if buffer < 1 {
 		buffer = 64
 	}
 	sub := &subscription{
-		out:  make(chan any, buffer),
-		live: live,
+		out:     make(chan any, buffer),
+		live:    live,
+		proto11: proto11,
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -464,7 +465,11 @@ type subscription struct {
 	closed bool
 	stale  bool
 	live   bool
-	mu     sync.Mutex
+	// proto11 is true when the connection negotiated the lsdp.v1.1
+	// subprotocol. Gates additive 1.1-only frames (scene_roster) so 1.0
+	// subscribers never receive them.
+	proto11 bool
+	mu      sync.Mutex
 }
 
 func (s *subscription) close() {

@@ -69,6 +69,13 @@ type Server struct {
 	scenes map[string]*Scene
 	active string // id of the currently-active scene for the live endpoint
 
+	// rosterMu guards the cached show roster (scene_roster frame). Kept
+	// separate from mu so a roster fan-out never contends with scene
+	// registration / SetActive.
+	rosterMu  sync.RWMutex
+	roster    []protocol.RosterEntry
+	rosterSet bool
+
 	httpSrv *http.Server
 	addr    string
 }
@@ -157,6 +164,66 @@ func (s *Server) SetActive(id string) error {
 		migrateLive(prev, scene)
 	}
 	return nil
+}
+
+// SetRoster caches the show's scene roster and fans a scene_roster
+// frame out to every live subscriber that negotiated lsdp.v1.1. The
+// cached roster is also replayed to each new subscriber right after its
+// initial snapshot (see serveLSDP). Passing an empty (or nil) slice is
+// valid — it advertises a show with no scenes as `entries: []`.
+//
+// Additive and idempotent from the caller's side : call it whenever the
+// set of scenes or their versions changes.
+func (s *Server) SetRoster(entries []protocol.RosterEntry) {
+	cloned := make([]protocol.RosterEntry, len(entries))
+	copy(cloned, entries)
+
+	s.rosterMu.Lock()
+	s.roster = cloned
+	s.rosterSet = true
+	s.rosterMu.Unlock()
+
+	frame := &protocol.SceneRoster{
+		Entries: cloned,
+		TS:      time.Now().UTC().Format(time.RFC3339),
+	}
+
+	s.mu.RLock()
+	scenes := make([]*Scene, 0, len(s.scenes))
+	for _, sc := range s.scenes {
+		scenes = append(scenes, sc)
+	}
+	s.mu.RUnlock()
+
+	for _, sc := range scenes {
+		sc.mu.Lock()
+		for sub := range sc.subscribers {
+			if !sub.live || !sub.proto11 {
+				continue
+			}
+			select {
+			case sub.out <- frame:
+			default:
+				sub.markStale()
+			}
+		}
+		sc.mu.Unlock()
+	}
+}
+
+// rosterFrame returns the cached roster as a ready-to-send frame and
+// whether a roster has ever been set. Used to replay the roster to a
+// freshly-subscribed 1.1 live connection.
+func (s *Server) rosterFrame() (*protocol.SceneRoster, bool) {
+	s.rosterMu.RLock()
+	defer s.rosterMu.RUnlock()
+	if !s.rosterSet {
+		return nil, false
+	}
+	return &protocol.SceneRoster{
+		Entries: s.roster,
+		TS:      time.Now().UTC().Format(time.RFC3339),
+	}, true
 }
 
 // detach removes a subscription from whichever scene currently owns

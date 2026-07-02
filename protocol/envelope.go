@@ -59,6 +59,7 @@ const (
 	TypeSnapshot     = "snapshot"
 	TypeDelta        = "delta"
 	TypeSceneChanged = "scene_changed"
+	TypeSceneRoster  = "scene_roster" // LSDP/1.1 — additive show-level preload roster
 	TypeError        = "error"
 	TypePong         = "pong"
 	TypeSubscribe    = "subscribe"
