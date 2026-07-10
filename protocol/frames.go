@@ -133,6 +133,36 @@ type SceneRoster struct {
 	TS      string        `json:"ts,omitempty"`
 }
 
+// OverlayAppState is the control state of one show-level overlay app: the
+// desired process state (Running) and on-air compositing state (OnAir). Both
+// are OPTIONAL (nil = "this dimension was never set", so a consumer leaves it
+// unchanged) — mirroring the partial-update semantics of the two boolean
+// leaves the state used to ride as (`__overlay.<id>.running|on_air`). A
+// consumer that reconciles an overlay app reads whichever dimensions are
+// present.
+type OverlayAppState struct {
+	Running *bool `json:"running,omitempty"`
+	OnAir   *bool `json:"on_air,omitempty"`
+}
+
+// OverlayApps is an additive, show-level frame carrying the COMPLETE desired
+// state of every stream-level overlay app (ADR 016 Prism §3.2, Marker). It is
+// the overlay analogue of SceneRoster: show metadata, not per-scene state, so
+// it is deliverable to a subscriber even when NO scene is active (the overlay
+// control lives above any single scene and survives scene switches).
+//
+// Like SceneRoster it carries no `seq` (out-of-band show metadata), is emitted
+// only to lsdp.v1.1 subscribers (1.0 silently ignore unknown types, spec §13),
+// and is sent once on subscribe (after the initial snapshot / roster) and again
+// whenever the overlay-app set changes. Apps is a FULL snapshot each time (not
+// a delta) and MUST encode as a JSON object (never null); an empty set is `{}`.
+type OverlayApps struct {
+	V    int                        `json:"v"`
+	Type string                     `json:"type"`
+	Apps map[string]OverlayAppState `json:"apps"`
+	TS   string                     `json:"ts,omitempty"`
+}
+
 // Error is the server-emitted error frame. Recoverable=false signals
 // "stop trying" ; the server MUST close the WebSocket within 1 second
 // of sending. Recoverable=true keeps the connection open.

@@ -46,6 +46,19 @@ func Encode(msg any) ([]byte, error) {
 			c.Entries = []RosterEntry{}
 		}
 		return marshal(c)
+	case OverlayApps:
+		m.V, m.Type = Version, TypeOverlayApps
+		if m.Apps == nil {
+			m.Apps = map[string]OverlayAppState{}
+		}
+		return marshal(m)
+	case *OverlayApps:
+		c := *m
+		c.V, c.Type = Version, TypeOverlayApps
+		if c.Apps == nil {
+			c.Apps = map[string]OverlayAppState{}
+		}
+		return marshal(c)
 	case Error:
 		m.V, m.Type = Version, TypeError
 		return marshal(m)
@@ -185,6 +198,12 @@ func DecodeServer(raw []byte) (any, error) {
 		return &m, nil
 	case TypeSceneRoster:
 		var m SceneRoster
+		if err := unmarshal(raw, &m); err != nil {
+			return nil, err
+		}
+		return &m, nil
+	case TypeOverlayApps:
+		var m OverlayApps
 		if err := unmarshal(raw, &m); err != nil {
 			return nil, err
 		}

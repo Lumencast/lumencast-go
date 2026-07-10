@@ -60,6 +60,7 @@ const (
 	TypeDelta        = "delta"
 	TypeSceneChanged = "scene_changed"
 	TypeSceneRoster  = "scene_roster" // LSDP/1.1 — additive show-level preload roster
+	TypeOverlayApps  = "overlay_apps" // LSDP/1.1 — additive show-level overlay-app control
 	TypeError        = "error"
 	TypePong         = "pong"
 	TypeSubscribe    = "subscribe"
