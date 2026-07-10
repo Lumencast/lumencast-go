@@ -76,6 +76,23 @@ type Server struct {
 	roster    []protocol.RosterEntry
 	rosterSet bool
 
+	// overlayMu guards the cached show-level overlay-app control state
+	// (overlay_apps frame). Like the roster it is show metadata, fanned out
+	// to every live 1.1 subscriber and replayed on join — including the
+	// holding subscribers below, so it reaches a consumer with no active
+	// scene.
+	overlayMu  sync.RWMutex
+	overlay    map[string]protocol.OverlayAppState
+	overlaySet bool
+
+	// holding carries live subscribers that connected while NO scene was
+	// active (an empty show). They receive show-level frames (roster,
+	// overlay_apps) but no scene state; when a scene first becomes active
+	// they are migrated onto it (migrateLive) with a fresh snapshot. Created
+	// once in New and never registered in scenes, so it never appears in the
+	// roster nor as the active scene.
+	holding *Scene
+
 	httpSrv *http.Server
 	addr    string
 }
@@ -101,11 +118,17 @@ func New(cfg Config) (*Server, error) {
 		cfg.MaxFrameBytes = 64 * 1024
 	}
 	return &Server{
-		cfg:    cfg,
-		logger: cfg.Logger,
-		scenes: make(map[string]*Scene),
+		cfg:     cfg,
+		logger:  cfg.Logger,
+		scenes:  make(map[string]*Scene),
+		holding: newScene(holdingSceneID),
 	}, nil
 }
+
+// holdingSceneID is the sentinel id of the internal holding scene a live
+// subscriber attaches to while the show has no active scene. It is never a
+// registered scene, so it appears in no roster and is never the active scene.
+const holdingSceneID = "__holding"
 
 // NewScene registers a new Scene under the given id and returns a
 // handle. Reusing an id replaces the previous Scene atomically and
@@ -115,10 +138,17 @@ func (s *Server) NewScene(id string, opts ...SceneOption) *Scene {
 	s.mu.Lock()
 	prev := s.scenes[id]
 	s.scenes[id] = scene
+	justActivated := false
 	if s.active == "" {
 		s.active = id
+		justActivated = true
 	}
 	s.mu.Unlock()
+	// First scene to go active: adopt any subscribers that were holding while
+	// the show was empty, so a scene-less join transitions onto the real scene.
+	if justActivated {
+		migrateLive(s.holding, scene)
+	}
 	if prev != nil {
 		// Best-effort : detach old subscribers. They'll reconnect
 		// against the new scene through the live endpoint.
@@ -156,10 +186,15 @@ func (s *Server) SetActive(id string) error {
 		s.mu.Unlock()
 		return nil
 	}
+	wasEmpty := s.active == ""
 	prev := s.scenes[s.active]
 	s.active = id
 	s.mu.Unlock()
 
+	// Activating from an empty show: adopt the holding subscribers.
+	if wasEmpty {
+		migrateLive(s.holding, scene)
+	}
 	if prev != nil && prev != scene {
 		migrateLive(prev, scene)
 	}
@@ -188,14 +223,28 @@ func (s *Server) SetRoster(entries []protocol.RosterEntry) {
 		TS:      time.Now().UTC().Format(time.RFC3339),
 	}
 
+	s.fanoutShowFrame(frame)
+}
+
+// allFanoutScenes returns every registered scene plus the holding scene — the
+// full set a show-level frame (roster, overlay_apps) fans out to. Including
+// holding is what reaches the subscribers that connected with no active scene.
+func (s *Server) allFanoutScenes() []*Scene {
 	s.mu.RLock()
-	scenes := make([]*Scene, 0, len(s.scenes))
+	scenes := make([]*Scene, 0, len(s.scenes)+1)
 	for _, sc := range s.scenes {
 		scenes = append(scenes, sc)
 	}
 	s.mu.RUnlock()
+	return append(scenes, s.holding)
+}
 
-	for _, sc := range scenes {
+// fanoutShowFrame sends a show-level metadata frame to every live 1.1
+// subscriber (across all scenes plus holding). Back-pressured subscribers are
+// marked stale, exactly as delta fan-out does. Used for both scene_roster and
+// overlay_apps.
+func (s *Server) fanoutShowFrame(frame any) {
+	for _, sc := range s.allFanoutScenes() {
 		sc.mu.Lock()
 		for sub := range sc.subscribers {
 			if !sub.live || !sub.proto11 {
@@ -209,6 +258,46 @@ func (s *Server) SetRoster(entries []protocol.RosterEntry) {
 		}
 		sc.mu.Unlock()
 	}
+}
+
+// SetOverlayApps caches the show's complete overlay-app control state and fans
+// an overlay_apps frame out to every live 1.1 subscriber — the overlay analogue
+// of SetRoster. The full state (not a delta) is cached and replayed to each new
+// subscriber after its snapshot (serveLSDP), INCLUDING a subscriber attached to
+// the holding scene, so the state is deliverable with no active scene. Passing
+// an empty (or nil) map is valid — it advertises a show with no overlay apps as
+// `apps: {}`. Additive and idempotent: call it whenever the overlay-app set or
+// any app's state changes.
+func (s *Server) SetOverlayApps(apps map[string]protocol.OverlayAppState) {
+	cloned := make(map[string]protocol.OverlayAppState, len(apps))
+	for k, v := range apps {
+		cloned[k] = v
+	}
+
+	s.overlayMu.Lock()
+	s.overlay = cloned
+	s.overlaySet = true
+	s.overlayMu.Unlock()
+
+	s.fanoutShowFrame(&protocol.OverlayApps{
+		Apps: cloned,
+		TS:   time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// overlayAppsFrame returns the cached overlay-app state as a ready-to-send
+// frame and whether SetOverlayApps has ever been called. Used to replay the
+// state to a freshly-subscribed 1.1 live connection.
+func (s *Server) overlayAppsFrame() (*protocol.OverlayApps, bool) {
+	s.overlayMu.RLock()
+	defer s.overlayMu.RUnlock()
+	if !s.overlaySet {
+		return nil, false
+	}
+	return &protocol.OverlayApps{
+		Apps: s.overlay,
+		TS:   time.Now().UTC().Format(time.RFC3339),
+	}, true
 }
 
 // rosterFrame returns the cached roster as a ready-to-send frame and
@@ -230,13 +319,9 @@ func (s *Server) rosterFrame() (*protocol.SceneRoster, bool) {
 // it. Used as the deferred cleanup in the WS handler so a migration
 // during SetActive does not leak.
 func (s *Server) detach(sub *subscription) {
-	s.mu.RLock()
-	scenes := make([]*Scene, 0, len(s.scenes))
-	for _, sc := range s.scenes {
-		scenes = append(scenes, sc)
-	}
-	s.mu.RUnlock()
-	for _, sc := range scenes {
+	// Includes the holding scene, so a subscriber that connected with no
+	// active scene (and was never migrated) is cleaned up too.
+	for _, sc := range s.allFanoutScenes() {
 		sc.unsubscribe(sub)
 	}
 }

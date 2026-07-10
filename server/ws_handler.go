@@ -123,6 +123,15 @@ func (s *Server) serveLSDP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		// 4c. Replay the cached show-level overlay-app state (overlay_apps),
+		// so a fresh 1.1 consumer — including one that joined with NO active
+		// scene (the holding path) — preloads the overlay control state.
+		if overlay, ok := s.overlayAppsFrame(); ok {
+			if err := sendFrame(ctx, c, overlay); err != nil {
+				s.logger.Debug("overlay_apps replay send failed", "err", err)
+				return
+			}
+		}
 	}
 
 	// 5. Loop. Reader and writer share the connection ; coder/websocket
@@ -140,10 +149,14 @@ func (s *Server) serveLSDP(w http.ResponseWriter, r *http.Request) {
 // (scene, session) and the role MUST be test or operator.
 func (s *Server) resolveScene(sub *protocol.Subscribe, id Identity) (*Scene, protocol.ErrorCode, string) {
 	if sub.Scene == "" {
-		// Live mode.
+		// Live mode. With no active scene, attach to the holding scene rather
+		// than rejecting: a live 1.1 subscriber can then still receive
+		// show-level frames (roster, overlay_apps) with an empty show and is
+		// migrated onto the first scene that becomes active. This is what makes
+		// the overlay_apps frame deliverable to a consumer with no scene.
 		scene := s.ActiveScene()
 		if scene == nil {
-			return nil, protocol.CodeSceneNotFound, "no active scene"
+			return s.holding, "", ""
 		}
 		return scene, "", ""
 	}
