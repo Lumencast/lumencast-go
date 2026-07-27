@@ -115,6 +115,11 @@ type LumencastError struct {
 	Code        ErrorCode `json:"code"`
 	Message     string    `json:"message"`
 	Recoverable bool      `json:"recoverable"`
+
+	// Path is the offending leaf path. Set on the path-scoped codes
+	// (WRITE_FORBIDDEN, UNKNOWN_PATH, INVALID_VALUE), empty otherwise
+	// — LSDP/1 §3.4.1.
+	Path string `json:"path,omitempty"`
 }
 
 // Error implements the standard library error interface.
@@ -128,5 +133,6 @@ func FromFrame(f *Error) *LumencastError {
 		Code:        ErrorCode(f.Code),
 		Message:     f.Message,
 		Recoverable: f.Recoverable,
+		Path:        f.Path,
 	}
 }

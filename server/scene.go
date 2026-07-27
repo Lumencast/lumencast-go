@@ -271,24 +271,30 @@ func (s *Scene) refreshAll() error {
 // applyInput is the server-internal entry point for an Input frame.
 // It runs the scope check, the declared-input check, the constraint
 // check, then commits the patches via Emit.
-func (s *Scene) applyInput(_ context.Context, id Identity, frame *protocol.Input) (protocol.ErrorCode, error) {
+//
+// The second return value is the offending leaf path : LSDP/1 §3.4.1
+// makes `path` REQUIRED on the WRITE_FORBIDDEN, UNKNOWN_PATH and
+// INVALID_VALUE error frames, so the rejection site — the only place
+// that knows which patch failed — hands it back to the caller. It is
+// empty for the codes that carry no path (and on success).
+func (s *Scene) applyInput(_ context.Context, id Identity, frame *protocol.Input) (protocol.ErrorCode, string, error) {
 	if len(frame.Patches) == 0 {
-		return protocol.CodeInvalidValue, errors.New("input: empty patches")
+		return protocol.CodeInvalidValue, "", errors.New("input: empty patches")
 	}
 
 	// Pre-validate every patch : either ALL apply or NONE.
 	for _, p := range frame.Patches {
 		if !id.CanWrite(p.Path) {
-			return protocol.CodeWriteForbidden, errors.New("write forbidden: " + p.Path)
+			return protocol.CodeWriteForbidden, p.Path, errors.New("write forbidden: " + p.Path)
 		}
 		if !s.acceptsInputPath(id.Role, p.Path) {
-			return protocol.CodeUnknownPath, errors.New("unknown path: " + p.Path)
+			return protocol.CodeUnknownPath, p.Path, errors.New("unknown path: " + p.Path)
 		}
 		if !json.Valid(p.Value) {
-			return protocol.CodeInvalidValue, errors.New("invalid JSON value at " + p.Path)
+			return protocol.CodeInvalidValue, p.Path, errors.New("invalid JSON value at " + p.Path)
 		}
 		if err := s.checkConstraint(p.Path, p.Value); err != nil {
-			return protocol.CodeInvalidValue, fmt.Errorf("invalid value at %s: %w", p.Path, err)
+			return protocol.CodeInvalidValue, p.Path, fmt.Errorf("invalid value at %s: %w", p.Path, err)
 		}
 	}
 
@@ -314,9 +320,9 @@ func (s *Scene) applyInput(_ context.Context, id Identity, frame *protocol.Input
 		}
 	}
 	if err := s.emitWithCause(patches, cause); err != nil {
-		return protocol.CodeInternal, err
+		return protocol.CodeInternal, "", err
 	}
-	return "", nil
+	return "", "", nil
 }
 
 // acceptsInputPath enforces the per-namespace policy :
