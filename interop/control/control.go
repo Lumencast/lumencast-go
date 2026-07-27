@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/Lumencast/lumencast-go/lsml"
 	"github.com/Lumencast/lumencast-go/protocol"
 	"github.com/Lumencast/lumencast-go/server"
 )
@@ -106,6 +107,20 @@ func (p *Plane) handleSetup(w http.ResponseWriter, r *http.Request) {
 		opts = append(opts, server.WithOperatorInputs(specs))
 	}
 	scene := p.srv.NewScene(effectiveID, opts...)
+
+	// Vendor-primitive validation (RFC-0001 + Amendment 2). A bundle
+	// carrying a malformed `x-zab.capture` is registered but marked
+	// unservable, so the subscriber gets an INVALID_VALUE error frame
+	// where it would otherwise read a snapshot of a scene built from a
+	// bundle we rejected. Scoped to capture nodes on purpose : the
+	// scenario suite feeds inline bodies from several LSML minors, and a
+	// full lsml.Validate here would reject primitives this SDK has not
+	// caught up with yet.
+	if layout, ok := primary.Inline["layout"]; ok {
+		if err := lsml.CheckZabCaptureNodes(layout); err != nil {
+			scene.Reject(protocol.CodeInvalidValue, err.Error())
+		}
+	}
 
 	// initial_state takes precedence ; fall back to inline.defaults
 	// for scenarios that declare a bundle with seeded values rather

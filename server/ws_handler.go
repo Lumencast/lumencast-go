@@ -82,6 +82,15 @@ func (s *Server) serveLSDP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 3b. A scene whose backing bundle failed validation is unservable :
+	// serve the recorded error instead of a snapshot of a scene built
+	// from a bundle we rejected.
+	if rej := scene.Rejection(); rej != nil {
+		_ = sendError(ctx, c, scene.seq.Current(), rej.Code, rej.Message, false)
+		_ = c.Close(websocket.StatusPolicyViolation, "bundle rejected")
+		return
+	}
+
 	// 4. Subscribe + ship initial frames. Honours LSDP/1.1
 	// `since_sequence` resume — when the replay buffer covers the gap,
 	// we ship a delta stream from since_sequence+1 forward instead of
