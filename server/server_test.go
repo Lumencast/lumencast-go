@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -93,6 +94,20 @@ func recv(t *testing.T, c *websocket.Conn) any {
 		t.Fatalf("decode %q: %v", raw, err)
 	}
 	return msg
+}
+
+// recvRaw returns the next frame's bytes verbatim — needed when the
+// assertion is about field PRESENCE, which decoding into a struct with
+// omitempty would erase.
+func recvRaw(t *testing.T, c *websocket.Conn) []byte {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, raw, err := c.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 func opAuth() server.Authenticator {
@@ -298,6 +313,10 @@ func TestInput_ViewerForbidden(t *testing.T) {
 	if e.Code != string(protocol.CodeWriteForbidden) {
 		t.Fatalf("code %q", e.Code)
 	}
+	// LSDP/1 §3.4.1 — path is REQUIRED on WRITE_FORBIDDEN.
+	if e.Path != "__inputs.title" {
+		t.Fatalf("path %q, want __inputs.title", e.Path)
+	}
 }
 
 func TestInput_UnknownPathRejected(t *testing.T) {
@@ -315,6 +334,52 @@ func TestInput_UnknownPathRejected(t *testing.T) {
 	e := recv(t, c).(*protocol.Error)
 	if e.Code != string(protocol.CodeUnknownPath) {
 		t.Fatalf("code %q", e.Code)
+	}
+	// LSDP/1 §3.4.1 — path is REQUIRED on UNKNOWN_PATH, and names the
+	// undeclared path the input referenced (not the declared one).
+	if e.Path != "__inputs.unknown" {
+		t.Fatalf("path %q, want __inputs.unknown", e.Path)
+	}
+}
+
+func TestInput_InvalidValueCarriesPath(t *testing.T) {
+	srv, url := startTestServer(t, opAuth())
+	scene := srv.NewScene("main", server.WithOperatorInputs([]server.InputSpec{
+		{Path: "__inputs.title", Type: "string", MaxLength: 5},
+	}))
+	_ = scene.Set(map[string]any{"__inputs.title": ""})
+
+	c := dial(t, url)
+	send(t, c, &protocol.Subscribe{Token: "op-tok"})
+	_ = recv(t, c)
+
+	send(t, c, &protocol.Input{
+		Patches: []protocol.Patch{
+			{Path: "__inputs.title", Value: json.RawMessage(`"way too long"`)},
+		},
+	})
+	e := recv(t, c).(*protocol.Error)
+	if e.Code != string(protocol.CodeInvalidValue) {
+		t.Fatalf("code %q", e.Code)
+	}
+	// LSDP/1 §3.4.1 — path is REQUIRED on INVALID_VALUE.
+	if e.Path != "__inputs.title" {
+		t.Fatalf("path %q, want __inputs.title", e.Path)
+	}
+}
+
+func TestError_NonPathScopedCodeOmitsPath(t *testing.T) {
+	// §3.4.1 closes the extra-field set per code : an emitter MUST NOT
+	// carry `path` on a code that does not declare it.
+	srv, url := startTestServer(t, opAuth())
+	srv.NewScene("main")
+	_ = srv.ActiveScene().Set(map[string]any{"x": 1})
+
+	c := dial(t, url)
+	send(t, c, &protocol.Subscribe{Token: "bad-tok"})
+	raw := recvRaw(t, c)
+	if bytes.Contains(raw, []byte(`"path"`)) {
+		t.Fatalf("AUTH_DENIED error frame carries a path field: %s", raw)
 	}
 }
 

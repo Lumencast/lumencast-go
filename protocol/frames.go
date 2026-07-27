@@ -175,6 +175,11 @@ type Error struct {
 	Message     string `json:"message"`
 	Recoverable bool   `json:"recoverable"`
 
+	// Path is REQUIRED on the path-scoped codes — WRITE_FORBIDDEN,
+	// UNKNOWN_PATH and INVALID_VALUE (§3.4.1) — and MUST be absent
+	// otherwise, hence `omitempty`.
+	Path string `json:"path,omitempty"`
+
 	// RetryAfterMs is optional and MAY be set on RATE_LIMIT errors.
 	// Encoded as `retry_after_ms` ; runtimes MAY honour it as a
 	// throttle hint.

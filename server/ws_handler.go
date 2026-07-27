@@ -216,9 +216,9 @@ func (s *Server) runConnection(
 		}
 		switch m := msg.(type) {
 		case *protocol.Input:
-			code, ierr := scene.applyInput(ctx, id, m)
+			code, path, ierr := scene.applyInput(ctx, id, m)
 			if ierr != nil {
-				_ = sendError(ctx, c, scene.seq.Current(), code, ierr.Error(), code != protocol.CodeAuthDenied)
+				_ = sendPathError(ctx, c, scene.seq.Current(), code, ierr.Error(), code != protocol.CodeAuthDenied, path)
 			}
 		case *protocol.Ping:
 			// LSDP/1.1 §3.5 : echo the nonce verbatim if present.
@@ -291,11 +291,20 @@ func sendFrame(ctx context.Context, c *websocket.Conn, msg any) error {
 // sendError ships an Error frame with the given fields. Callers use
 // this for both pre-subscribe errors (seq=0) and mid-flight errors.
 func sendError(ctx context.Context, c *websocket.Conn, seq uint64, code protocol.ErrorCode, msg string, recoverable bool) error {
+	return sendPathError(ctx, c, seq, code, msg, recoverable, "")
+}
+
+// sendPathError is sendError for the path-scoped codes : LSDP/1 §3.4.1
+// makes `path` REQUIRED on WRITE_FORBIDDEN, UNKNOWN_PATH and
+// INVALID_VALUE. An empty path encodes to no field at all, so this is
+// also the safe form for the codes that carry none.
+func sendPathError(ctx context.Context, c *websocket.Conn, seq uint64, code protocol.ErrorCode, msg string, recoverable bool, path string) error {
 	return sendFrame(ctx, c, &protocol.Error{
 		Seq:         seq,
 		Code:        string(code),
 		Message:     msg,
 		Recoverable: recoverable,
+		Path:        path,
 	})
 }
 
