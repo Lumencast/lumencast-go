@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Lumencast/lumencast-go/interop/control"
+	"github.com/Lumencast/lumencast-go/protocol"
 	"github.com/Lumencast/lumencast-go/server"
 )
 
@@ -116,6 +117,91 @@ func TestEmitWithoutSetupReturnsConflict(t *testing.T) {
 	resp := postJSON(t, ts.URL+"/test/emit", body)
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("emit without setup: expected 409, got %d", resp.StatusCode)
+	}
+}
+
+// /test/setup registers a scene whose inline bundle carries a
+// malformed `x-zab.capture`, but marks it unservable so subscribers get
+// INVALID_VALUE instead of a snapshot (RFC-0001 + Amendment 2). Setup
+// itself still answers 200 : the scenario drives the rejection over the
+// WebSocket, not over the control plane.
+func TestSetupRejectsMalformedZabCapture(t *testing.T) {
+	cases := map[string]map[string]any{
+		"bare device id": {
+			"kind": "x-zab.capture", "id": "cam",
+			"x-zab.sourceKind": "media.webcam",
+			"x-zab.deviceRef":  "video:0",
+			"size":             map[string]any{"w": 640, "h": 360},
+		},
+		"media.file without size": {
+			"kind": "x-zab.capture", "id": "intro",
+			"x-zab.sourceKind": "media.file",
+			"x-zab.deviceRef":  "intro-sting",
+		},
+	}
+	for name, node := range cases {
+		t.Run(name, func(t *testing.T) {
+			ts, srv, _ := newPlaneHTTP(t)
+			body, _ := json.Marshal(map[string]any{
+				"bundles": []map[string]any{{
+					"id":   "capture",
+					"hash": "sha256:cabdead",
+					"inline": map[string]any{
+						"scene_id": "capture",
+						"layout": map[string]any{
+							"kind":     "frame",
+							"children": []any{node},
+						},
+					},
+				}},
+			})
+			if resp := postJSON(t, ts.URL+"/test/setup", body); resp.StatusCode != http.StatusOK {
+				t.Fatalf("setup: status %d", resp.StatusCode)
+			}
+			scene, ok := srv.Scene("capture")
+			if !ok {
+				t.Fatal("scene not registered")
+			}
+			rej := scene.Rejection()
+			if rej == nil {
+				t.Fatal("malformed x-zab.capture must mark the scene unservable")
+			}
+			if rej.Code != protocol.CodeInvalidValue {
+				t.Fatalf("got code %q, want INVALID_VALUE", rej.Code)
+			}
+		})
+	}
+}
+
+// A well-formed capture bundle stays servable.
+func TestSetupAcceptsValidZabCapture(t *testing.T) {
+	ts, srv, _ := newPlaneHTTP(t)
+	body, _ := json.Marshal(map[string]any{
+		"bundles": []map[string]any{{
+			"id":   "capture",
+			"hash": "sha256:cabdead",
+			"inline": map[string]any{
+				"scene_id": "capture",
+				"layout": map[string]any{
+					"kind": "frame",
+					"children": []any{map[string]any{
+						"kind": "x-zab.capture", "id": "mic",
+						"x-zab.sourceKind": "media.mic",
+						"x-zab.deviceRef":  "main-mic",
+					}},
+				},
+			},
+		}},
+	})
+	if resp := postJSON(t, ts.URL+"/test/setup", body); resp.StatusCode != http.StatusOK {
+		t.Fatalf("setup: status %d", resp.StatusCode)
+	}
+	scene, ok := srv.Scene("capture")
+	if !ok {
+		t.Fatal("scene not registered")
+	}
+	if rej := scene.Rejection(); rej != nil {
+		t.Fatalf("valid capture bundle must stay servable, got %+v", rej)
 	}
 }
 

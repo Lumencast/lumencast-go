@@ -46,6 +46,18 @@ type Scene struct {
 	// populate this from an LSML bundle ; for code-driven scenes the
 	// user calls DeclareInputs / WithOperatorInputs explicitly.
 	declaredInputs map[string]InputSpec
+
+	// rejection, when non-nil, marks the scene unservable : every
+	// subscriber gets this error frame instead of a snapshot. Set by
+	// Reject when the backing bundle failed validation.
+	rejection *SceneRejection
+}
+
+// SceneRejection is the error a rejected scene serves in place of its
+// snapshot.
+type SceneRejection struct {
+	Code    protocol.ErrorCode
+	Message string
 }
 
 // SceneOption configures a Scene at creation time.
@@ -154,6 +166,22 @@ func (s *Scene) SetVersion(v string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.version = v
+}
+
+// Reject marks the scene unservable : every subscriber receives code /
+// message as a non-recoverable error frame in place of the snapshot.
+// Used when the bundle backing the scene fails validation.
+func (s *Scene) Reject(code protocol.ErrorCode, message string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rejection = &SceneRejection{Code: code, Message: message}
+}
+
+// Rejection returns the rejection recorded by Reject, or nil.
+func (s *Scene) Rejection() *SceneRejection {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rejection
 }
 
 // Set seeds initial state. Existing subscribers receive a fresh
