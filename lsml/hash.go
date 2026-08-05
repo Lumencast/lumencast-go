@@ -30,6 +30,31 @@ func HashBundle(b *Bundle) (string, []byte, error) {
 	if err != nil {
 		return "", nil, err
 	}
+	return HashRaw(raw)
+}
+
+// HashRaw computes the LSML 1.0 content hash for a bundle supplied as raw
+// JSON, under the exact rules documented on HashBundle. Returns the
+// lowercase hex sha256 plus the canonical JSON bytes.
+//
+// Use this — not HashBundle — to VERIFY a bundle that came from elsewhere.
+// Bundle is a typed VIEW of the format, not a container for it: a document
+// carrying any member Bundle does not declare (a vendor extension, a newer
+// spec field, an `animations` catalogue) loses it on unmarshal, so what gets
+// hashed is not what was received. Round-tripping foreign bytes through the
+// struct reports a mismatch that says more about this struct's field list
+// than about the document.
+//
+// HashBundle stays the right call for a bundle the caller just built: it
+// delegates here after marshalling, so the two agree by construction and
+// there is one canonicalisation in this package, not two.
+//
+// Numbers decode into float64, exactly as HashBundle has always done — an
+// integer beyond float64's exact range canonicalises to its nearest
+// representable value. That is shared, documented behaviour of the reference
+// TS serializer too (see the `big` case in the cross-language golden), not a
+// property of this entry point.
+func HashRaw(raw []byte) (string, []byte, error) {
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return "", nil, err

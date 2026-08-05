@@ -2,6 +2,7 @@ package lsml_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/Lumencast/lumencast-go/lsml"
@@ -96,5 +97,98 @@ func TestHashBundle_CrossLanguageGolden(t *testing.T) {
 				t.Errorf("sha256 diverges for %s\n  go: %s\n  ts: %s", tc.name, goHash, tc.tsHash)
 			}
 		})
+	}
+}
+
+// TestHashRaw_CrossLanguageGolden pins HashRaw on the SAME TS-produced
+// goldens, fed as the raw bytes they are — no struct in the path. Every
+// golden here is struct-representable, so this is the case where HashRaw and
+// HashBundle MUST agree; the divergence HashRaw exists for is covered by
+// TestHashRaw_PreservesMembersBundleDoesNotDeclare.
+func TestHashRaw_CrossLanguageGolden(t *testing.T) {
+	for _, tc := range xlangGoldenCases() {
+		if tc.expectGap {
+			continue
+		}
+		t.Run(tc.name, func(t *testing.T) {
+			rawHash, rawCanon, err := lsml.HashRaw([]byte(tc.bundle))
+			if err != nil {
+				t.Fatalf("HashRaw: %v", err)
+			}
+			if string(rawCanon) != tc.tsCanon {
+				t.Errorf("canonical bytes diverge from TS\n  go: %s\n  ts: %s", rawCanon, tc.tsCanon)
+			}
+			if rawHash != tc.tsHash {
+				t.Errorf("sha256 diverges from TS\n  go: %s\n  ts: %s", rawHash, tc.tsHash)
+			}
+
+			// And it agrees with the struct path on the inputs the struct can
+			// carry — HashBundle delegates here, so a divergence would mean
+			// the marshal step is not the identity it claims to be.
+			var b lsml.Bundle
+			if err := json.Unmarshal([]byte(tc.bundle), &b); err != nil {
+				t.Fatalf("unmarshal bundle: %v", err)
+			}
+			bundleHash, _, err := lsml.HashBundle(&b)
+			if err != nil {
+				t.Fatalf("HashBundle: %v", err)
+			}
+			if bundleHash != rawHash {
+				t.Errorf("HashBundle %s != HashRaw %s on a struct-representable bundle",
+					bundleHash, rawHash)
+			}
+		})
+	}
+}
+
+// The reason HashRaw exists. Bundle is a typed VIEW: a member it does not
+// declare is dropped on unmarshal, so hashing the struct hashes something
+// the sender never sent. A verifier built on HashBundle would report drift
+// on every document carrying such a member — here `animations`, which real
+// producers do carry — and the report would be about this struct's field
+// list, not about the document.
+func TestHashRaw_PreservesMembersBundleDoesNotDeclare(t *testing.T) {
+	const raw = `{"lsml":"1.1","scene_id":"s",` +
+		`"scene_version":"sha256:0000000000000000000000000000000000000000000000000000000000000000",` +
+		`"layout":{"kind":"stack"},"animations":{"pop":{"target":"score","keyframes":[]}}}`
+
+	rawHash, rawCanon, err := lsml.HashRaw([]byte(raw))
+	if err != nil {
+		t.Fatalf("HashRaw: %v", err)
+	}
+	if !strings.Contains(string(rawCanon), `"animations"`) {
+		t.Fatalf("HashRaw dropped a member it must preserve: %s", rawCanon)
+	}
+
+	var b lsml.Bundle
+	if err := json.Unmarshal([]byte(raw), &b); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	structHash, structCanon, err := lsml.HashBundle(&b)
+	if err != nil {
+		t.Fatalf("HashBundle: %v", err)
+	}
+	if strings.Contains(string(structCanon), `"animations"`) {
+		t.Fatal("Bundle now declares animations — this test's premise is stale, revisit it")
+	}
+	if structHash == rawHash {
+		t.Fatal("struct and raw hashes agree despite a dropped member: the loss is undetectable")
+	}
+}
+
+// A bundle with no scene_version at all still hashes: setSceneVersion only
+// substitutes a member that exists. Guards the verifier against panicking on
+// a malformed document instead of simply reporting a mismatch.
+func TestHashRaw_ToleratesAbsentSceneVersion(t *testing.T) {
+	if _, _, err := lsml.HashRaw([]byte(`{"lsml":"1.1","layout":{"kind":"stack"}}`)); err != nil {
+		t.Fatalf("HashRaw on a bundle without scene_version: %v", err)
+	}
+}
+
+// Malformed JSON is an error, never a hash — a verifier must not be able to
+// mistake garbage for a value that simply differs.
+func TestHashRaw_RejectsMalformedJSON(t *testing.T) {
+	if _, _, err := lsml.HashRaw([]byte(`{"lsml":`)); err == nil {
+		t.Fatal("HashRaw accepted malformed JSON")
 	}
 }
