@@ -253,6 +253,50 @@ func TestSubscribeWithSinceSequence_Resumes(t *testing.T) {
 	}
 }
 
+func TestSubscribeWithSinceSequence_ResumesWithProjectionMetadata(t *testing.T) {
+	srv, url := startTestServer(t, opAuth())
+	scene := srv.NewScene("main", server.WithDeclaredInputs([]string{"__inputs.title"}))
+	_ = scene.Set(map[string]any{"__inputs.title": ""})
+
+	md := &protocol.ProjectionMetadata{
+		SchemaVersion:     "schema-v1",
+		SceneDigest:       "scene-abc",
+		RuntimeInstanceID: "runtime-xyz",
+		Target:            "projection-target",
+		RenderRevision:    "rev-123",
+		CorrelationID:     "corr-456",
+	}
+	if err := scene.EmitWithCauseAndMetadata(
+		map[string]any{"__inputs.title": "hi"},
+		&protocol.Cause{Source: "svc"},
+		md,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	c := dial(t, url)
+	send(t, c, &protocol.Subscribe{Token: "op-tok", SinceSequence: 1})
+	msg := recv(t, c)
+	delta, ok := msg.(*protocol.Delta)
+	if !ok {
+		t.Fatalf("expected delta on resume, got %T", msg)
+	}
+	if delta.Seq != 2 {
+		t.Fatalf("resume delta seq: got %d want 2", delta.Seq)
+	}
+	if delta.SchemaVersion != "schema-v1" ||
+		delta.SceneDigest != "scene-abc" ||
+		delta.RuntimeInstanceID != "runtime-xyz" ||
+		delta.Target != "projection-target" ||
+		delta.RenderRevision != "rev-123" ||
+		delta.CorrelationID != "corr-456" {
+		t.Fatalf("projection metadata missing on resume delta: %+v", delta)
+	}
+	if delta.Cause == nil || delta.Cause.Source != "svc" {
+		t.Fatalf("expected cause with source, got %+v", delta.Cause)
+	}
+}
+
 func TestSubscribeWithSinceSequence_FallsBackToSnapshot(t *testing.T) {
 	// When the replay buffer doesn't cover the requested resume point,
 	// the server MUST fall back to a fresh snapshot (§18.1).

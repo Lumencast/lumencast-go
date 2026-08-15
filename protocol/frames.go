@@ -25,6 +25,17 @@ type Cause struct {
 	InputID string `json:"input_id,omitempty"` // echoes Input.ClientMsgID
 }
 
+// ProjectionMetadata carries optional, non-semantic metadata attached
+// to a delta. Receivers MAY store it for traceability and diagnostics.
+type ProjectionMetadata struct {
+	SchemaVersion     string `json:"schema_version,omitempty"`
+	SceneDigest       string `json:"scene_digest,omitempty"`
+	RuntimeInstanceID string `json:"runtime_instance_id,omitempty"`
+	Target            string `json:"target,omitempty"`
+	RenderRevision    string `json:"render_revision,omitempty"`
+	CorrelationID     string `json:"correlation_id,omitempty"`
+}
+
 // SceneTransition is a show-level scene-swap transition on a
 // scene_changed frame (LSDP/1.1 §3.3.1).
 type SceneTransition struct {
@@ -67,6 +78,15 @@ type Delta struct {
 	// (LSDP/1.1 §3.2.3). Receivers MUST NOT use it for semantic
 	// decisions — debug/audit only. 1.0 servers omit this field.
 	Cause *Cause `json:"cause,omitempty"`
+
+	// Projection metadata is optional and non-semantic. These fields are
+	// additive and unknown to legacy readers (which should ignore them).
+	SchemaVersion     string `json:"schema_version,omitempty"`
+	SceneDigest       string `json:"scene_digest,omitempty"`
+	RuntimeInstanceID string `json:"runtime_instance_id,omitempty"`
+	Target            string `json:"target,omitempty"`
+	RenderRevision    string `json:"render_revision,omitempty"`
+	CorrelationID     string `json:"correlation_id,omitempty"`
 }
 
 // Patch addresses a single leaf with its new value.

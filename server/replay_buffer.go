@@ -16,6 +16,9 @@ type replayRecord struct {
 	seq     uint64
 	patches []protocol.Patch
 	cause   *protocol.Cause
+	// projectionMetadata carries optional, additive metadata associated
+	// with the delta emission path.
+	projectionMetadata *protocol.ProjectionMetadata
 }
 
 // replayBuffer is a bounded ring of recent (seq, patches, cause)
@@ -43,10 +46,22 @@ func newReplayBuffer(cap int) *replayBuffer {
 
 // push records a new emission. Monotonic seq is the caller's
 // responsibility ; the buffer does not enforce it.
-func (b *replayBuffer) push(seq uint64, patches []protocol.Patch, cause *protocol.Cause) {
+func (b *replayBuffer) push(seq uint64, patches []protocol.Patch, cause *protocol.Cause, metadata *protocol.ProjectionMetadata) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.records[b.head] = replayRecord{seq: seq, patches: patches, cause: cause}
+	// Keep a defensive copy so callers mutating the incoming metadata
+	// after emit cannot race with replay readers.
+	var copiedMetadata *protocol.ProjectionMetadata
+	if metadata != nil {
+		c := *metadata
+		copiedMetadata = &c
+	}
+	b.records[b.head] = replayRecord{
+		seq:                seq,
+		patches:            patches,
+		cause:              cause,
+		projectionMetadata: copiedMetadata,
+	}
 	b.head = (b.head + 1) % b.cap
 	if b.size < b.cap {
 		b.size++
