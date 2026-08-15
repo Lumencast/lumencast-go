@@ -549,6 +549,40 @@ func TestDeltaWithCauseAndTransition_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestDeltaWithProjectionMetadata_RoundTrip(t *testing.T) {
+	in := Delta{
+		Seq: 7,
+		Patches: []Patch{
+			{
+				Path:  "score",
+				Value: json.RawMessage(`42`),
+			},
+		},
+		Cause:             &Cause{Source: "operator:alice", InputID: "ui-9f3a"},
+		SchemaVersion:     "schema-v1",
+		SceneDigest:       "scene-abc",
+		RuntimeInstanceID: "rt-123",
+		Target:            "preview",
+		RenderRevision:    "rev-456",
+		CorrelationID:     "corr-789",
+	}
+	raw, err := Encode(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"schema_version":"schema-v1"`) {
+		t.Fatalf("schema_version not encoded: %s", raw)
+	}
+	msg, err := DecodeServer(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := msg.(*Delta)
+	if got.SchemaVersion != "schema-v1" || got.SceneDigest != "scene-abc" || got.RuntimeInstanceID != "rt-123" || got.Target != "preview" || got.RenderRevision != "rev-456" || got.CorrelationID != "corr-789" {
+		t.Fatalf("projection metadata not round-tripped: %+v", got)
+	}
+}
+
 func TestSceneChangedWithTransition_RoundTrip(t *testing.T) {
 	in := SceneChanged{
 		Seq:          100,
@@ -602,7 +636,7 @@ func TestForwardCompat_1_0Server_Ignores_1_1_Fields(t *testing.T) {
 	// A 1.0 client receiving a 1.1 frame with optional fields SHOULD
 	// decode it cleanly (the additional fields are tolerated by Go's
 	// stdlib JSON decoder by default — they go into nil pointers).
-	raw := []byte(`{"v":1,"type":"delta","seq":1,"patches":[{"path":"x","value":1}],"cause":{"source":"adapter:http_poll"}}`)
+	raw := []byte(`{"v":1,"type":"delta","seq":1,"patches":[{"path":"x","value":1}],"cause":{"source":"adapter:http_poll"},"schema_version":"schema-v1","scene_digest":"scene-abc","runtime_instance_id":"rt-123","target":"preview","render_revision":"rev-456","correlation_id":"corr-789"}`)
 	msg, err := DecodeServer(raw)
 	if err != nil {
 		t.Fatal(err)

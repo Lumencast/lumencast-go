@@ -108,10 +108,33 @@ func (s *Server) serveLSDP(w http.ResponseWriter, r *http.Request) {
 		// Replay path — ship the buffered deltas before entering the
 		// main loop. Each carries its original (per-scene) seq.
 		for _, r := range replay {
+			md := r.projectionMetadata
+			var (
+				schemaVersion     string
+				sceneDigest       string
+				runtimeInstanceID string
+				target            string
+				renderRevision    string
+				correlationID     string
+			)
+			if md != nil {
+				schemaVersion = md.SchemaVersion
+				sceneDigest = md.SceneDigest
+				runtimeInstanceID = md.RuntimeInstanceID
+				target = md.Target
+				renderRevision = md.RenderRevision
+				correlationID = md.CorrelationID
+			}
 			d := &protocol.Delta{
-				Seq:     r.seq,
-				Patches: r.patches,
-				Cause:   r.cause,
+				Seq:               r.seq,
+				Patches:           r.patches,
+				Cause:             r.cause,
+				SchemaVersion:     schemaVersion,
+				SceneDigest:       sceneDigest,
+				RuntimeInstanceID: runtimeInstanceID,
+				Target:            target,
+				RenderRevision:    renderRevision,
+				CorrelationID:     correlationID,
 			}
 			if err := sendFrame(ctx, c, d); err != nil {
 				s.logger.Debug("replay delta send failed", "err", err)

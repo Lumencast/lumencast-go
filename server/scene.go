@@ -34,7 +34,8 @@ type Scene struct {
 	// this counter, NOT seq=1. The first emission on a fresh scene
 	// returns seq=1 from NextServer.
 	seq *protocol.SequenceTracker
-	// replay holds the recent (seq, patches, cause) emissions so a 1.1
+	// replay holds the recent (seq, patches, cause, projection metadata)
+	// emissions so a 1.1
 	// client reconnecting with `since_sequence` can resume without a
 	// fresh snapshot (LSDP/1.1 §18.1).
 	replay      *replayBuffer
@@ -203,7 +204,7 @@ func (s *Scene) Set(patches map[string]any) error {
 // a Delta frame to every subscriber. Subscribers whose buffer is
 // full collapse to a snapshot to avoid unbounded growth.
 func (s *Scene) Emit(patches map[string]any) error {
-	return s.emitWithCause(patches, nil)
+	return s.emitWithCause(patches, nil, nil)
 }
 
 // EmitWithCause is the LSDP/1.1 entry point — same as Emit, but the
@@ -212,10 +213,18 @@ func (s *Scene) Emit(patches map[string]any) error {
 // origin info through to the wire. 1.0 callers stay on Emit and
 // produce cause-less deltas.
 func (s *Scene) EmitWithCause(patches map[string]any, cause *protocol.Cause) error {
-	return s.emitWithCause(patches, cause)
+	return s.emitWithCause(patches, cause, nil)
 }
 
-func (s *Scene) emitWithCause(patches map[string]any, cause *protocol.Cause) error {
+// EmitWithCauseAndMetadata is LSDP/1.1 entry point for caller-provided
+// projection metadata, in addition to Cause.
+// Solar/Orion can pass the six projection fields without forcing any
+// caller-side contract changes outside the 1.1 wire surface.
+func (s *Scene) EmitWithCauseAndMetadata(patches map[string]any, cause *protocol.Cause, metadata *protocol.ProjectionMetadata) error {
+	return s.emitWithCause(patches, cause, metadata)
+}
+
+func (s *Scene) emitWithCause(patches map[string]any, cause *protocol.Cause, metadata *protocol.ProjectionMetadata) error {
 	if len(patches) == 0 {
 		return ErrEmptyPatches
 	}
@@ -233,9 +242,9 @@ func (s *Scene) emitWithCause(patches map[string]any, cause *protocol.Cause) err
 	// LSDP/1.1 §18.1.1 — per-scene monotonic seq. All concurrent
 	// subscribers receive the same delta with the same seq.
 	seq := s.seq.NextServer()
-	s.replay.push(seq, wirePatches, cause)
+	s.replay.push(seq, wirePatches, cause, metadata)
 	for sub := range s.subscribers {
-		s.sendDelta(sub, seq, wirePatches, cause)
+		s.sendDelta(sub, seq, wirePatches, cause, metadata)
 	}
 	return nil
 }
@@ -243,11 +252,31 @@ func (s *Scene) emitWithCause(patches map[string]any, cause *protocol.Cause) err
 // sendDelta enqueues a Delta on a subscription, falling back to a
 // fresh Snapshot if the buffer is full (back-pressure protection).
 // Caller MUST hold s.mu.
-func (s *Scene) sendDelta(sub *subscription, seq uint64, patches []protocol.Patch, cause *protocol.Cause) {
+func (s *Scene) sendDelta(
+	sub *subscription,
+	seq uint64,
+	patches []protocol.Patch,
+	cause *protocol.Cause,
+	metadata *protocol.ProjectionMetadata,
+) {
 	d := &protocol.Delta{
-		Seq:     seq,
-		Patches: patches,
-		Cause:   cause,
+		Seq:               seq,
+		Patches:           patches,
+		Cause:             cause,
+		SchemaVersion:     "",
+		SceneDigest:       "",
+		RuntimeInstanceID: "",
+		Target:            "",
+		RenderRevision:    "",
+		CorrelationID:     "",
+	}
+	if metadata != nil {
+		d.SchemaVersion = metadata.SchemaVersion
+		d.SceneDigest = metadata.SceneDigest
+		d.RuntimeInstanceID = metadata.RuntimeInstanceID
+		d.Target = metadata.Target
+		d.RenderRevision = metadata.RenderRevision
+		d.CorrelationID = metadata.CorrelationID
 	}
 	select {
 	case sub.out <- d:
@@ -347,7 +376,7 @@ func (s *Scene) applyInput(_ context.Context, id Identity, frame *protocol.Input
 			InputID: frame.ClientMsgID,
 		}
 	}
-	if err := s.emitWithCause(patches, cause); err != nil {
+	if err := s.emitWithCause(patches, cause, nil); err != nil {
 		return protocol.CodeInternal, "", err
 	}
 	return "", "", nil
