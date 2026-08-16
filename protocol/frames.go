@@ -59,6 +59,20 @@ type Snapshot struct {
 	SceneID      string                     `json:"scene_id"`
 	SceneVersion string                     `json:"scene_version"`
 	State        map[string]json.RawMessage `json:"state"`
+
+	// Projection metadata is optional and non-semantic — the same six
+	// fields carried on Delta (below). These are additive and unknown to
+	// legacy readers (which should ignore them). A server that knows the
+	// scene's last projection identity SHOULD stamp it here too, so a
+	// subscriber that never saw the originating Delta — because it
+	// resumed via a fresh Snapshot, joined late, or collapsed out of
+	// back-pressure — does not lose correlation identity.
+	SchemaVersion     string `json:"schema_version,omitempty"`
+	SceneDigest       string `json:"scene_digest,omitempty"`
+	RuntimeInstanceID string `json:"runtime_instance_id,omitempty"`
+	Target            string `json:"target,omitempty"`
+	RenderRevision    string `json:"render_revision,omitempty"`
+	CorrelationID     string `json:"correlation_id,omitempty"`
 }
 
 // Delta carries one or more leaf patches. Patches are applied

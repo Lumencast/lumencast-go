@@ -583,6 +583,54 @@ func TestDeltaWithProjectionMetadata_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestSnapshotWithProjectionMetadata_RoundTrip(t *testing.T) {
+	in := Snapshot{
+		Seq:          3,
+		SceneID:      "main-stage",
+		SceneVersion: "sha256:abc",
+		State: map[string]json.RawMessage{
+			"show.title": json.RawMessage(`"Hello"`),
+		},
+		SchemaVersion:     "schema-v1",
+		SceneDigest:       "scene-abc",
+		RuntimeInstanceID: "rt-123",
+		Target:            "preview",
+		RenderRevision:    "rev-456",
+		CorrelationID:     "corr-789",
+	}
+	raw, err := Encode(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"schema_version":"schema-v1"`) {
+		t.Fatalf("schema_version not encoded: %s", raw)
+	}
+	msg, err := DecodeServer(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := msg.(*Snapshot)
+	if got.SchemaVersion != "schema-v1" || got.SceneDigest != "scene-abc" || got.RuntimeInstanceID != "rt-123" || got.Target != "preview" || got.RenderRevision != "rev-456" || got.CorrelationID != "corr-789" {
+		t.Fatalf("projection metadata not round-tripped: %+v", got)
+	}
+}
+
+func TestSnapshotWithoutProjectionMetadata_OmitsFields(t *testing.T) {
+	in := Snapshot{
+		Seq:          1,
+		SceneID:      "main-stage",
+		SceneVersion: "sha256:abc",
+		State:        map[string]json.RawMessage{},
+	}
+	raw, err := Encode(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "schema_version") || strings.Contains(string(raw), "scene_digest") || strings.Contains(string(raw), "correlation_id") {
+		t.Fatalf("unset projection metadata must be omitted, not fabricated: %s", raw)
+	}
+}
+
 func TestSceneChangedWithTransition_RoundTrip(t *testing.T) {
 	in := SceneChanged{
 		Seq:          100,

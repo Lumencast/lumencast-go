@@ -372,6 +372,7 @@ func migrateLive(prev, next *Scene) {
 			SceneVersion: next.version,
 			State:        state,
 		}
+		next.stampMetadata(snap)
 		select {
 		case sub.out <- snap:
 		default:
