@@ -41,6 +41,16 @@ type Scene struct {
 	replay      *replayBuffer
 	subscribers map[*subscription]struct{}
 
+	// lastMetadata is the most recently known projection metadata from
+	// an EmitWithCauseAndMetadata call — the scene's last known
+	// correlation identity. Every Snapshot construction site (collapse
+	// recovery, refreshAll, late-join subscribe, live migration) stamps
+	// it onto the outgoing frame so a subscriber that never saw the
+	// originating Delta still gets a correlatable identity. Nil until
+	// the first EmitWithCauseAndMetadata call ; Snapshot fields are then
+	// omitted entirely rather than fabricated.
+	lastMetadata *protocol.ProjectionMetadata
+
 	// declaredInputs is the subset of __inputs.* paths the scene
 	// accepts, keyed by path. Empty means "accept anything under
 	// __inputs.*". The CLI's lumencast validate would normally
@@ -239,6 +249,13 @@ func (s *Scene) emitWithCause(patches map[string]any, cause *protocol.Cause, met
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if metadata != nil {
+		// Defensive copy — same rationale as replayBuffer.push : a caller
+		// mutating the metadata it just passed in must not race with a
+		// later Snapshot construction reading s.lastMetadata.
+		md := *metadata
+		s.lastMetadata = &md
+	}
 	// LSDP/1.1 §18.1.1 — per-scene monotonic seq. All concurrent
 	// subscribers receive the same delta with the same seq.
 	seq := s.seq.NextServer()
@@ -247,6 +264,21 @@ func (s *Scene) emitWithCause(patches map[string]any, cause *protocol.Cause, met
 		s.sendDelta(sub, seq, wirePatches, cause, metadata)
 	}
 	return nil
+}
+
+// stampMetadata copies the scene's last known projection metadata (if
+// any) onto snap. Caller MUST hold s.mu. No-op when no metadata is
+// known yet — omission, never fabrication.
+func (s *Scene) stampMetadata(snap *protocol.Snapshot) {
+	if s.lastMetadata == nil {
+		return
+	}
+	snap.SchemaVersion = s.lastMetadata.SchemaVersion
+	snap.SceneDigest = s.lastMetadata.SceneDigest
+	snap.RuntimeInstanceID = s.lastMetadata.RuntimeInstanceID
+	snap.Target = s.lastMetadata.Target
+	snap.RenderRevision = s.lastMetadata.RenderRevision
+	snap.CorrelationID = s.lastMetadata.CorrelationID
 }
 
 // sendDelta enqueues a Delta on a subscription, falling back to a
@@ -292,6 +324,7 @@ func (s *Scene) sendDelta(
 			SceneVersion: s.version,
 			State:        s.store.snapshot(),
 		}
+		s.stampMetadata(snap)
 		// Best-effort send — if even the snapshot can't be enqueued,
 		// the subscription is dead and the writer goroutine will close.
 		select {
@@ -316,6 +349,7 @@ func (s *Scene) refreshAll() error {
 			SceneVersion: s.version,
 			State:        state,
 		}
+		s.stampMetadata(snap)
 		select {
 		case sub.out <- snap:
 		default:
@@ -500,6 +534,7 @@ func (s *Scene) subscribeWithResume(buffer int, live, proto11 bool, sinceSequenc
 		SceneVersion: s.version,
 		State:        state,
 	}
+	s.stampMetadata(snap)
 	return sub, snap, nil
 }
 
